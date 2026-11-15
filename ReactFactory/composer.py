@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import imageio_ffmpeg
+from sfx import ensure_pop_sfx
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
@@ -199,12 +200,12 @@ def compose_react_short(
     outro_dur = get_media_duration(outro_audio_wav)
     viral_dur = get_media_duration(viral_video_path)
 
-    max_viral_use = min(viral_dur, 26.0)
+    max_viral_use = min(viral_dur, 23.5)
     inter_sec = float(script_data.get("interrupt_sec", max_viral_use * 0.55))
-    inter_sec = min(max(4.5, inter_sec), max(5.0, max_viral_use - 3.5))
+    inter_sec = min(max(4.5, inter_sec), max(5.0, max_viral_use - 3.2))
 
     part1_dur = inter_sec
-    part2_dur = max(3.5, max_viral_use - inter_sec)
+    part2_dur = max(3.2, max_viral_use - inter_sec)
 
     t_hook_end = hook_dur
     t_part1_end = t_hook_end + part1_dur
@@ -249,17 +250,20 @@ def compose_react_short(
 
         if t < t_hook_end:
             prog = t / max(0.1, hook_dur)
-            v_frame = viral_reader.get_frame_at(inter_sec, loop=False)
-            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.04 + 0.08 * prog)
+            # Prévia dinâmica em câmera lenta (sem imagem parada no segundo 0) para segurar swipe
+            teaser_t = min(max_viral_use - 0.1, max(0.0, inter_sec - 1.4) + t * 0.45)
+            v_frame = viral_reader.get_frame_at(teaser_t, loop=False)
+            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.05 + 0.09 * prog)
             av_frame = hook_reader.get_frame_at(t, loop=False)
-            bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.02)
+            bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.03)
             caption_str, active_word_idx = get_active_chunk(hook_words, prog)
             is_speaking = True
 
         elif t < t_part1_end:
             v_t = t - t_hook_end
+            prog_p1 = v_t / max(0.1, part1_dur)
             v_frame = viral_reader.get_frame_at(v_t, loop=False)
-            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.03)
+            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.02 + 0.05 * prog_p1)
             av_frame = idle_reader.get_frame_at(v_t, loop=True, pingpong=True)
             bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.0)
 
@@ -267,21 +271,25 @@ def compose_react_short(
             inter_t = t - t_part1_end
             prog = inter_t / max(0.1, inter_dur)
             v_frame = viral_reader.get_frame_at(inter_sec, loop=False)
-            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.08 + 0.06 * prog)
+            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.09 + 0.07 * prog)
             gray = cv2.cvtColor(top_img, cv2.COLOR_BGR2GRAY)
             gray_bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
             top_img = cv2.addWeighted(top_img, 0.45, gray_bgr, 0.55, -15)
+            if inter_t < 0.12:
+                flash_w = 0.45 * (1.0 - inter_t / 0.12)
+                top_img = cv2.addWeighted(top_img, 1.0 - flash_w, np.full_like(top_img, 255), flash_w, 0)
 
             av_frame = inter_reader.get_frame_at(inter_t, loop=False)
-            bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.04)
+            bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.05)
             caption_str, active_word_idx = get_active_chunk(inter_words, prog)
             is_speaking = True
 
         else:
             part2_t = t - t_inter_end
+            prog_p2 = part2_t / max(0.1, part2_dur)
             v_t = inter_sec + part2_t
             v_frame = viral_reader.get_frame_at(v_t, loop=False)
-            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.03)
+            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.04 + 0.06 * prog_p2)
 
             time_left = t_total - t
             if time_left <= outro_dur:
@@ -327,15 +335,19 @@ def compose_react_short(
     ms_part2 = int(t_inter_end * 1000)
     ms_outro = max(ms_part2, int((t_total - outro_dur) * 1000))
 
+    sfx_pop_path = ensure_pop_sfx()
+
     filter_complex = (
-        f"[0:a]volume=1.45[a_hook];"
-        f"[1:a]adelay={ms_part1}|{ms_part1},volume=0.75[a_vp1];"
-        f"[2:a]adelay={ms_inter}|{ms_inter},volume=1.45[a_inter];"
-        f"[3:a]adelay={ms_part2}|{ms_part2},volume=0.55[a_vp2];"
-        f"[4:a]adelay={ms_outro}|{ms_outro},volume=1.5[a_outro];"
-        f"[5:a]volume=0.65[a_whoosh];"
-        f"[6:a]adelay={ms_inter}|{ms_inter},volume=0.75[a_freeze];"
-        f"[a_hook][a_vp1][a_inter][a_vp2][a_outro][a_whoosh][a_freeze]amix=inputs=7:duration=longest:dropout_transition=0,volume=2.2[a_final]"
+        f"[0:a]volume=1.15[a_hook];"
+        f"[1:a]adelay={ms_part1}|{ms_part1},volume=0.60[a_vp1];"
+        f"[2:a]adelay={ms_inter}|{ms_inter},volume=1.15[a_inter];"
+        f"[3:a]adelay={ms_part2}|{ms_part2},volume=0.45[a_vp2];"
+        f"[4:a]adelay={ms_outro}|{ms_outro},volume=1.15[a_outro];"
+        f"[5:a]volume=0.45[a_whoosh];"
+        f"[6:a]adelay={ms_inter}|{ms_inter},volume=0.55[a_freeze];"
+        f"[7:a]adelay={ms_part1}|{ms_part1},volume=0.40[a_pop1];"
+        f"[8:a]adelay={ms_outro}|{ms_outro},volume=0.38[a_pop2];"
+        f"[a_hook][a_vp1][a_inter][a_vp2][a_outro][a_whoosh][a_freeze][a_pop1][a_pop2]amix=inputs=9:duration=longest:dropout_transition=0:normalize=0,volume=0.95[a_final]"
     )
 
     mixed_audio = os.path.join(TEMP_DIR, "mixed_master.wav")
@@ -348,6 +360,8 @@ def compose_react_short(
         "-i", outro_audio_wav,
         "-i", sfx_whoosh_path,
         "-i", sfx_freeze_path,
+        "-i", sfx_pop_path,
+        "-i", sfx_pop_path,
         "-filter_complex", filter_complex,
         "-map", "[a_final]",
         "-t", f"{t_total:.2f}",
