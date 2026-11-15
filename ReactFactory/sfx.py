@@ -50,6 +50,24 @@ def generate_freeze_hit(filepath, duration=0.32, sample_rate=44100):
             wav.writeframes(struct.pack("<h", int(val * 32767)))
 
 
+def generate_pop_cue(filepath, duration=0.14, sample_rate=44100):
+    """Gera um pop agudo curto e limpo para cortes e trocas de cena."""
+    n_samples = int(duration * sample_rate)
+    with wave.open(filepath, "w") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        phase = 0.0
+        for i in range(n_samples):
+            t = i / sample_rate
+            norm = t / duration
+            env = math.sin(math.pi * min(1.0, norm * 2.5)) * math.exp(-t * 22.0)
+            freq = 320.0 + 480.0 * norm
+            phase += 2 * math.pi * freq / sample_rate
+            val = max(-1.0, min(1.0, math.sin(phase) * env * 0.7))
+            wav.writeframes(struct.pack("<h", int(val * 32767)))
+
+
 def ensure_sfx():
     whoosh_path = os.path.join(ASSETS_DIR, "sfx_whoosh.wav")
     freeze_path = os.path.join(ASSETS_DIR, "sfx_freeze.wav")
@@ -57,7 +75,15 @@ def ensure_sfx():
         generate_whoosh(whoosh_path)
     if not os.path.exists(freeze_path):
         generate_freeze_hit(freeze_path)
+    ensure_pop_sfx()
     return whoosh_path, freeze_path
+
+
+def ensure_pop_sfx():
+    pop_path = os.path.join(ASSETS_DIR, "sfx_pop.wav")
+    if not os.path.exists(pop_path):
+        generate_pop_cue(pop_path)
+    return pop_path
 
 
 if __name__ == "__main__":
