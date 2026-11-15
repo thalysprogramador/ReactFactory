@@ -1,0 +1,9 @@
+yt-dlp
+edge-tts
+gradio_client
+imageio-ffmpeg
+opencv-python-headless
+Pillow
+numpy
+requests
+kaggle
