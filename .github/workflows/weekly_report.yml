@@ -1,0 +1,39 @@
+name: Weekly Channel Analytics Report (Sunday 10h BRT)
+
+on:
+  schedule:
+    # Todo domingo às 10h00 (Horário de Brasília / UTC-3 = 13:00 UTC)
+    - cron: '0 13 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send-weekly-analytics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Minimal Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install imageio-ffmpeg opencv-python-headless
+
+      - name: Run Weekly YouTube Analytics Analyst & Send Email
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          YOUTUBE_TOKEN_BASE64: ${{ secrets.YOUTUBE_TOKEN_BASE64 }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          DESTINATION_EMAILS: ${{ secrets.DESTINATION_EMAILS }}
+        run: |
+          python ReactFactory/weekly_analyst.py --send
