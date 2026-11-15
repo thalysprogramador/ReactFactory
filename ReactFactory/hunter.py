@@ -2,10 +2,14 @@ import os
 import json
 import random
 import re
+import base64
+import urllib.request
+import urllib.parse
 from datetime import datetime, timezone
 import imageio_ffmpeg
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(BASE_DIR)
 DATA_DIR = os.path.join(BASE_DIR, "data")
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
 HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
@@ -104,6 +108,92 @@ def _views_per_day(info):
         return 0.0, 9999
 
 
+def _parse_iso_duration(iso_dur):
+    if not iso_dur or not iso_dur.startswith("PT"):
+        return 0
+    total, num = 0, ""
+    for ch in iso_dur[2:]:
+        if ch.isdigit():
+            num += ch
+        else:
+            val = int(num or 0)
+            num = ""
+            if ch == "H":
+                total += val * 3600
+            elif ch == "M":
+                total += val * 60
+            elif ch == "S":
+                total += val
+    return total
+
+
+def _get_youtube_cookies_file():
+    """Prepara cookies.txt autenticado a partir do secret YOUTUBE_COOKIES_B64 ou arquivo local."""
+    cookie_dest = os.path.join(TEMP_DIR, "yt_cookies.txt")
+    b64_val = os.environ.get("YOUTUBE_COOKIES_B64", "").strip()
+    if b64_val:
+        raw = base64.b64decode(b64_val).decode("utf-8", errors="replace")
+        with open(cookie_dest, "w", encoding="utf-8") as f:
+            f.write(raw)
+        return cookie_dest
+
+    raw_txt = os.environ.get("YOUTUBE_COOKIES_TXT", "").strip()
+    if raw_txt:
+        with open(cookie_dest, "w", encoding="utf-8") as f:
+            f.write(raw_txt)
+        return cookie_dest
+
+    local_cookie = os.path.join(ROOT_DIR, "_render_secrets", "youtube_cookies.txt")
+    if os.path.exists(local_cookie) and os.path.getsize(local_cookie) > 50:
+        return local_cookie
+    return None
+
+
+def _fetch_videos_metadata_api(video_ids):
+    """Busca metadados oficiais de até 50 vídeos de uma vez via YouTube Data API v3 (sem anti-bot)."""
+    try:
+        from uploader import get_youtube_access_token
+        token = get_youtube_access_token(1)
+    except Exception as e:
+        print(f"[HUNTER BR] Aviso OAuth Data API ({e}), tentando fallback yt-dlp...")
+        return {}
+
+    result = {}
+    for i in range(0, len(video_ids), 50):
+        chunk = video_ids[i:i + 50]
+        url = (
+            "https://www.googleapis.com/youtube/v3/videos"
+            f"?part=snippet,contentDetails,statistics&id={urllib.parse.quote(','.join(chunk))}"
+        )
+        req = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        for item in data.get("items", []):
+            vid = item["id"]
+            sn = item.get("snippet", {})
+            cd = item.get("contentDetails", {})
+            st = item.get("statistics", {})
+            pub_iso = sn.get("publishedAt", "")
+            ts = None
+            if pub_iso:
+                ts = datetime.fromisoformat(pub_iso.replace("Z", "+00:00")).timestamp()
+            result[vid] = {
+                "id": vid,
+                "title": sn.get("title", ""),
+                "description": sn.get("description", ""),
+                "language": sn.get("defaultAudioLanguage") or sn.get("defaultLanguage") or "",
+                "duration": _parse_iso_duration(cd.get("duration", "")),
+                "view_count": int(st.get("viewCount") or 0),
+                "timestamp": ts,
+                "webpage_url": f"https://www.youtube.com/watch?v={vid}",
+            }
+    return result
+
+
 def hunt_viral_video(output_path=None, max_age_days=15):
     """
     Minera Shorts BRASILEIROS em alta de trends (estilo TikTok/Reels), humor,
@@ -160,9 +250,19 @@ def hunt_viral_video(output_path=None, max_age_days=15):
 
     scored = []
     fallback_scored = []
-    with yt_dlp.YoutubeDL(full_opts) as ydl_full:
-        for e in candidates[:32]:
-            full = ydl_full.extract_info(f"https://www.youtube.com/watch?v={e['id']}", download=False)
+    top_candidates = candidates[:36]
+    api_meta = _fetch_videos_metadata_api([c["id"] for c in top_candidates])
+    cookie_file = _get_youtube_cookies_file()
+    if cookie_file:
+        full_opts["cookiefile"] = cookie_file
+        print("[HUNTER BR] Cookies autenticados carregados para download.")
+
+    ydl_full = yt_dlp.YoutubeDL(full_opts) if not api_meta else None
+    try:
+        for e in top_candidates:
+            full = api_meta.get(e["id"])
+            if not full and ydl_full:
+                full = ydl_full.extract_info(f"https://www.youtube.com/watch?v={e['id']}", download=False)
             if not full or _is_blocked(full.get("title")):
                 continue
             if _looks_non_brazilian(full):
@@ -182,6 +282,9 @@ def hunt_viral_video(output_path=None, max_age_days=15):
                 scored.append(item)
             elif age <= 45:
                 fallback_scored.append(item)
+    finally:
+        if ydl_full:
+            ydl_full.close()
 
     if not scored:
         scored = fallback_scored
@@ -198,6 +301,8 @@ def hunt_viral_video(output_path=None, max_age_days=15):
             "outtmpl": output_path, "ffmpeg_location": FFMPEG_EXE,
             "merge_output_format": "mp4", "quiet": True, "no_warnings": True,
         }
+        if cookie_file:
+            dl_opts["cookiefile"] = cookie_file
         try:
             with yt_dlp.YoutubeDL(dl_opts) as ydl_dl:
                 ydl_dl.download([full["webpage_url"]])
