@@ -416,7 +416,7 @@ def render_html_report(metrics, ai_notes, is_preview=False):
           <!-- HEADER -->
           <tr>
             <td style="background:linear-gradient(135deg,#0F172A 0%,#1E293B 100%);padding:28px 30px;color:#FFFFFF;">
-              <div style="font-size:11px;letter-spacing:1.8px;text-transform:uppercase;color:#FACC15;font-weight:700;margin-bottom:6px;">REACTFACTORY // RELATÓRIO DOMINICAL DE PERFORMANCE</div>
+              <div style="font-size:11px;letter-spacing:1.8px;text-transform:uppercase;color:#FACC15;font-weight:700;margin-bottom:6px;">VELLI ANALYTICS // RELATÓRIO DOMINICAL DE PERFORMANCE</div>
               <h1 style="margin:0;font-size:24px;line-height:1.25;font-weight:800;color:#FFFFFF;">Canal {html.escape(ch['title'])}</h1>
               <div style="margin-top:8px;font-size:13px;color:#CBD5E1;">Período analisado: <strong style="color:#FFFFFF;">{html.escape(metrics['period_label'])}</strong> &bull; {sm['videos_count']} vídeos avaliados</div>
             </td>
@@ -529,7 +529,7 @@ def render_html_report(metrics, ai_notes, is_preview=False):
           <!-- FOOTER -->
           <tr>
             <td style="background:#F8FAFC;padding:16px 30px;text-align:center;border-top:1px solid #E2E8F0;font-size:11px;color:#64748B;">
-              Relatório automático dominical gerado pelo <strong>ReactFactory Analytics Agent</strong> &bull; Dados oficiais via YouTube Data &amp; Analytics API
+              Relatório automático dominical gerado pelo <strong>Velli Analytics</strong> &bull; Dados oficiais via YouTube Data &amp; Analytics API
             </td>
           </tr>
         </table>
@@ -573,7 +573,7 @@ def send_weekly_email(html_content, subject):
     server.login(sender, password)
     for dest in destinations:
         msg = MIMEMultipart("alternative")
-        msg["From"] = f"ReactFactory Analytics <{sender}>"
+        msg["From"] = f"Velli Analytics <{sender}>"
         msg["To"] = dest
         msg["Subject"] = subject
         msg.attach(MIMEText(html_content, "html", "utf-8"))
@@ -602,7 +602,7 @@ def main():
     print(f"[ANALYST] HTML salvo em: {preview_path}")
 
     if args.send:
-        subject = f"📊 Relatório Semanal Cortes Todo Dia ({metrics['period_label']}) — {_fmt_int(metrics['summary']['views'])} views"
+        subject = f"📊 Velli Analytics: Cortes Todo Dia ({metrics['period_label']}) — {_fmt_int(metrics['summary']['views'])} views"
         send_weekly_email(html_out, subject)
 
 
