@@ -35,9 +35,14 @@ BR_HASHTAG_FEEDS = [
 # 2. Canais brasileiros gigantes de trends, entretenimento, humor, curiosidades e influenciadores
 SOURCE_CHANNELS = [
     "@Enaldinho", "@vocesabia", "@AlmanaqueSOS", "@DiogoDefante",
-    "@cienciatododia", "@CazeTV", "@Nostalgia", "@t3ddy",
-    "@CortesdoCasimitoOFICIAL", "@ManualdoMundo", "@PortaDosFundos",
+    "@cienciatododia", "@Nostalgia", "@t3ddy",
+    "@ManualdoMundo", "@PortaDosFundos",
     "@rezendeevil", "@FatosDesconhecidos", "@Podpah", "@FlowPodcast", "@felipeneto",
+]
+
+TIKTOK_CURATED_CREATORS = [
+    "@manualdomundo", "@cienciatododia", "@vocesabia", "@fatosdesconhecidos",
+    "@almanaque.sos", "@portadosfundos", "@enaldinho", "@t3ddy", "@podpah",
 ]
 
 BLOCKED_WORDS = [
@@ -194,6 +199,87 @@ def _fetch_videos_metadata_api(video_ids):
     return result
 
 
+def _ensure_h264_mp4(path):
+    """Garante compatibilidade OpenCV caso o vídeo baixado venha em AV1/HEVC."""
+    import subprocess
+    import cv2
+    cap = cv2.VideoCapture(path)
+    ok, _ = cap.read()
+    cap.release()
+    if ok:
+        return
+    tmp = path + ".h264.mp4"
+    subprocess.run(
+        [FFMPEG_EXE, "-y", "-i", path, "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-c:a", "aac", tmp],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True
+    )
+    os.replace(tmp, path)
+
+
+def _hunt_tiktok_curated(output_path, used_ids):
+    """Fallback blindado usando criadores brasileiros verificados do TikTok (zero cookies)."""
+    import yt_dlp
+    print("[HUNTER TIKTOK BR] Acionando mineração segura em perfis brasileiros curados...")
+    flat_opts = {
+        "quiet": True, "no_warnings": True, "extract_flat": "in_playlist",
+        "ignoreerrors": True, "skip_download": True, "playlistend": 8,
+    }
+    creators = list(TIKTOK_CURATED_CREATORS)
+    random.shuffle(creators)
+    candidates = []
+    with yt_dlp.YoutubeDL(flat_opts) as ydl:
+        for creator in creators[:6]:
+            try:
+                res = ydl.extract_info(f"https://www.tiktok.com/{creator}", download=False) or {}
+                for e in (res.get("entries") or []):
+                    vid = str(e.get("id") or "")
+                    if not vid or vid in used_ids or _is_blocked(e.get("title")):
+                        continue
+                    dur = e.get("duration") or 0
+                    if dur and not (10 <= dur <= 58):
+                        continue
+                    v = e.get("view_count") or 0
+                    candidates.append((v, creator, e))
+            except Exception as err:
+                print(f"[HUNTER TIKTOK BR] Aviso {creator}: {err}")
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    for v, creator, e in candidates[:12]:
+        u = e.get("url") or e.get("webpage_url")
+        if not u:
+            continue
+        vid = str(e["id"])
+        title = (e.get("title") or f"Vídeo de {creator}").strip()
+        print(f"[HUNTER TIKTOK BR] Baixando {creator}: {title[:70]} ({v:,} views)")
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        dl_opts = {
+            "outtmpl": output_path, "ffmpeg_location": FFMPEG_EXE,
+            "merge_output_format": "mp4", "quiet": True, "no_warnings": True,
+        }
+        try:
+            with yt_dlp.YoutubeDL(dl_opts) as ydl_dl:
+                ydl_dl.download([u])
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 50_000:
+                _ensure_h264_mp4(output_path)
+                return {
+                    "id": f"tt_{vid}",
+                    "source": f"TikTok {creator}",
+                    "title": title,
+                    "description": (e.get("description") or title)[:800],
+                    "duration": e.get("duration") or 25,
+                    "views": int(v),
+                    "views_per_day": int(v),
+                    "age_days": 1.0,
+                    "outlier_score": 2.0,
+                    "url": u,
+                    "path": output_path,
+                }
+        except Exception as err:
+            print(f"[HUNTER TIKTOK BR] Falhou download ({err}), próximo...")
+    return None
+
+
 def hunt_viral_video(output_path=None, max_age_days=15):
     """
     Minera Shorts BRASILEIROS em alta de trends (estilo TikTok/Reels), humor,
@@ -250,7 +336,7 @@ def hunt_viral_video(output_path=None, max_age_days=15):
 
     scored = []
     fallback_scored = []
-    top_candidates = candidates[:36]
+    top_candidates = candidates[:50]
     api_meta = _fetch_videos_metadata_api([c["id"] for c in top_candidates])
     cookie_file = _get_youtube_cookies_file()
     if cookie_file:
@@ -286,18 +372,18 @@ def hunt_viral_video(output_path=None, max_age_days=15):
         if ydl_full:
             ydl_full.close()
 
-    if not scored:
-        scored = fallback_scored
     scored.sort(key=lambda x: x[0], reverse=True)
+    fallback_scored.sort(key=lambda x: x[0], reverse=True)
+    ordered_pool = scored + fallback_scored
 
-    for _, vpd, age, full in scored:
+    for _, vpd, age, full in ordered_pool:
         vid_id = full["id"]
         print(f"[HUNTER BR] Selecionado ({full.get('_source')}): {full.get('title')} | "
               f"{full.get('view_count'):,} views | {age:.1f} dias | {vpd:,.0f} views/dia")
         if os.path.exists(output_path):
             os.remove(output_path)
         dl_opts = {
-            "format": "bestvideo[ext=mp4][height<=1920]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "format": "bestvideo[height<=1920][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=1920][vcodec!^=av01]+bestaudio/bestvideo[height<=1920]+bestaudio/best",
             "outtmpl": output_path, "ffmpeg_location": FFMPEG_EXE,
             "merge_output_format": "mp4", "quiet": True, "no_warnings": True,
         }
@@ -310,6 +396,7 @@ def hunt_viral_video(output_path=None, max_age_days=15):
             print(f"[HUNTER BR] Falhou download ({err}), próximo...")
             continue
         if os.path.exists(output_path) and os.path.getsize(output_path) > 50_000:
+            _ensure_h264_mp4(output_path)
             return {
                 "id": vid_id,
                 "source": full.get("_source", ""),
@@ -323,6 +410,10 @@ def hunt_viral_video(output_path=None, max_age_days=15):
                 "url": full["webpage_url"],
                 "path": output_path,
             }
+
+    tt_res = _hunt_tiktok_curated(output_path, used_ids)
+    if tt_res:
+        return tt_res
 
     raise RuntimeError("Nenhum viral brasileiro recente encontrado.")
 
