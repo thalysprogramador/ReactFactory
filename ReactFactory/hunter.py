@@ -104,7 +104,7 @@ def _views_per_day(info):
         return 0.0, 9999
 
 
-def hunt_viral_video(output_path=None, max_age_days=25):
+def hunt_viral_video(output_path=None, max_age_days=15):
     """
     Minera Shorts BRASILEIROS em alta de trends (estilo TikTok/Reels), humor,
     influenciadores e curiosidades atuais, ranqueando por velocidade viral (views/dia)
@@ -161,25 +161,26 @@ def hunt_viral_video(output_path=None, max_age_days=25):
     scored = []
     fallback_scored = []
     with yt_dlp.YoutubeDL(full_opts) as ydl_full:
-        for e in candidates[:28]:
+        for e in candidates[:32]:
             full = ydl_full.extract_info(f"https://www.youtube.com/watch?v={e['id']}", download=False)
             if not full or _is_blocked(full.get("title")):
                 continue
             if _looks_non_brazilian(full):
                 continue
             dur = full.get("duration") or 0
-            if not (10 <= dur <= 58):
+            if not (10 <= dur <= 55):
                 continue
             vpd, age = _views_per_day(full)
             full["_outlier"] = e["_outlier"]
             full["_source"] = e["_source"]
-            # Bônus para trends/memes/influenciadores recentes (< 14 dias)
-            recency_bonus = 1.6 if age <= 7 else (1.2 if age <= 15 else 1.0)
-            score = vpd * (0.5 + min(e["_outlier"], 4.0)) * e["_tag_bonus"] * recency_bonus
+            # Prioridade máxima para trends quentes das últimas 24h-72h + duração ágil (12-34s)
+            recency_bonus = 3.2 if age <= 3.0 else (1.8 if age <= 7.0 else (1.1 if age <= 15.0 else 0.7))
+            dur_bonus = 1.25 if 12 <= dur <= 34 else 1.0
+            score = vpd * (0.5 + min(e["_outlier"], 4.0)) * e["_tag_bonus"] * recency_bonus * dur_bonus
             item = (score, vpd, age, full)
             if age <= max_age_days:
                 scored.append(item)
-            elif age <= 60:
+            elif age <= 45:
                 fallback_scored.append(item)
 
     if not scored:
