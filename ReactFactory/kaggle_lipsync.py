@@ -102,7 +102,7 @@ def _dump_kernel_error_log(kernel_ref, env):
         print(f"[KAGGLE] Não foi possível baixar log de erro: {e}")
 
 
-def run_batch_lipsync_kaggle(jobs, out_dir, timeout_sec=1200):
+def run_batch_lipsync_kaggle(jobs, out_dir, timeout_sec=1200, max_video_sec=8.0):
     """
     Executa LatentSync v1.5 em lote na GPU T4 gratuita do Kaggle.
     """
@@ -130,7 +130,7 @@ def run_batch_lipsync_kaggle(jobs, out_dir, timeout_sec=1200):
             src_vid = Path(job["video_path"]).resolve()
             if str(src_vid) not in copied_videos:
                 dst_vid_name = f"vid_{len(copied_videos)}_{src_vid.stem}_25fps.mp4"
-                _prepare_video_for_latentsync(src_vid, ds_dir / dst_vid_name, max_sec=8.0)
+                _prepare_video_for_latentsync(src_vid, ds_dir / dst_vid_name, max_sec=max_video_sec)
                 copied_videos[str(src_vid)] = dst_vid_name
 
             src_aud = Path(job["audio_path"]).resolve()
@@ -190,7 +190,7 @@ def run_batch_lipsync_kaggle(jobs, out_dir, timeout_sec=1200):
         denied_count = 0
         while time.time() < deadline:
             time.sleep(20)
-            _, st_out = _run_kaggle(["kernels", "status", kernel_ref], env, check=False)
+            rc_st, st_out = _run_kaggle(["kernels", "status", kernel_ref], env, check=False)
             low = st_out.lower()
             print(f"[KAGGLE] Status: {st_out}")
             if "permission 'kernels.get' was denied" in low:
@@ -198,9 +198,12 @@ def run_batch_lipsync_kaggle(jobs, out_dir, timeout_sec=1200):
                 if denied_count >= 5:
                     raise RuntimeError(f"Sem acesso ao kernel {kernel_ref}: {st_out}")
                 continue
-            if "complete" in low:
+            if rc_st != 0 or "connecttimeouterror" in low or "max retries exceeded" in low or "connectionerror" in low:
+                # Erro transitório de rede ao consultar status: tenta novamente no próximo ciclo
+                continue
+            if "kernelworkerstatus.complete" in low or '"complete"' in low:
                 break
-            if "error" in low or "cancel" in low:
+            if "kernelworkerstatus.error" in low or "kernelworkerstatus.cancel" in low:
                 _dump_kernel_error_log(kernel_ref, env)
                 raise RuntimeError(f"Kernel Kaggle falhou: {st_out}")
         else:
