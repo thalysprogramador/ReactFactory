@@ -337,16 +337,17 @@ def compose_react_short(
 
     sfx_pop_path = ensure_pop_sfx()
 
+    outro_rel_p2 = max(0.0, (ms_outro - ms_part2) / 1000.0)
     filter_complex = (
-        f"[0:a]volume=1.15[a_hook];"
-        f"[1:a]adelay={ms_part1}|{ms_part1},volume=0.60[a_vp1];"
-        f"[2:a]adelay={ms_inter}|{ms_inter},volume=1.15[a_inter];"
-        f"[3:a]adelay={ms_part2}|{ms_part2},volume=0.45[a_vp2];"
-        f"[4:a]adelay={ms_outro}|{ms_outro},volume=1.15[a_outro];"
-        f"[5:a]volume=0.45[a_whoosh];"
-        f"[6:a]adelay={ms_inter}|{ms_inter},volume=0.55[a_freeze];"
-        f"[7:a]adelay={ms_part1}|{ms_part1},volume=0.40[a_pop1];"
-        f"[8:a]adelay={ms_outro}|{ms_outro},volume=0.38[a_pop2];"
+        f"[0:a]volume=1.18[a_hook];"
+        f"[1:a]adelay={ms_part1}|{ms_part1},volume=0.58[a_vp1];"
+        f"[2:a]adelay={ms_inter}|{ms_inter},volume=1.18[a_inter];"
+        f"[3:a]volume='if(gte(t,{outro_rel_p2:.2f}),0.18,0.52)':eval=frame,adelay={ms_part2}|{ms_part2}[a_vp2];"
+        f"[4:a]adelay={ms_outro}|{ms_outro},volume=1.18[a_outro];"
+        f"[5:a]volume=0.42[a_whoosh];"
+        f"[6:a]adelay={ms_inter}|{ms_inter},volume=0.52[a_freeze];"
+        f"[7:a]adelay={ms_part1}|{ms_part1},volume=0.38[a_pop1];"
+        f"[8:a]adelay={ms_outro}|{ms_outro},volume=0.35[a_pop2];"
         f"[a_hook][a_vp1][a_inter][a_vp2][a_outro][a_whoosh][a_freeze][a_pop1][a_pop2]amix=inputs=9:duration=longest:dropout_transition=0:normalize=0,volume=0.95[a_final]"
     )
 
