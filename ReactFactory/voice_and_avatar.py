@@ -48,77 +48,154 @@ def get_audio_duration(audio_path):
     return 3.5
 
 
-def generate_realistic_voice(text, output_wav_path, style_hint="empolgado, carismático e muito natural"):
-    gemini_key = get_secret("GEMINI_API_KEY", "1_GEMINI_API_KEY.txt")
-    raw_wav = output_wav_path + ".raw.wav"
+UNIFIED_VOICE_PERSONA = (
+    "Leia em Português do Brasil mantendo EXATAMENTE o mesmo tom de voz, altura, timbre, "
+    "cadência rápida e energia constante de um único criador jovem de YouTube Shorts, "
+    "falando com firmeza e naturalidade sem mudar de humor nem dar risadas forçadas"
+)
 
-    if gemini_key:
-        for attempt in range(3):
-            try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={gemini_key}"
-                prompt = f"Fale em Português do Brasil como um criador/streamer {style_hint}, com ritmo rápido, expressivo e natural de YouTube Shorts: {text}"
-                payload = {
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "responseModalities": ["AUDIO"],
-                        "speechConfig": {
-                            "voiceConfig": {
-                                "prebuiltVoiceConfig": {"voiceName": "Puck"}
-                            }
-                        },
-                    },
+
+def _master_voice_wav(raw_input_path, output_wav_path):
+    """Padroniza timbre, presença vocal, corte de silêncio e volume (LUFS) entre todas as falas."""
+    af = (
+        "silenceremove=start_periods=1:start_silence=0.03:start_threshold=-42dB,"
+        "areverse,"
+        "silenceremove=start_periods=1:start_silence=0.03:start_threshold=-42dB,"
+        "areverse,"
+        "equalizer=f=150:width_type=o:width=1.5:g=2.0,"
+        "equalizer=f=3200:width_type=o:width=1.5:g=1.5,"
+        "acompressor=threshold=-18dB:ratio=2.8:attack=5:release=60,"
+        "loudnorm=I=-15:TP=-1.5:LRA=4"
+    )
+    subprocess.run([
+        FFMPEG_EXE, "-y", "-i", raw_input_path,
+        "-af", af,
+        "-ar", "24000", "-ac", "1", output_wav_path,
+    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return output_wav_path
+
+
+def _call_gemini_tts(text, raw_wav_path, gemini_key, persona_prompt=UNIFIED_VOICE_PERSONA):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={gemini_key}"
+    prompt = f"{persona_prompt}: \"{text}\""
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {
+                "voiceConfig": {
+                    "prebuiltVoiceConfig": {"voiceName": "Puck"}
                 }
-                req = urllib.request.Request(
-                    url,
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=45) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    pcm_b64 = data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
-                    pcm_bytes = base64.b64decode(pcm_b64)
-                    with wave.open(raw_wav, "wb") as wf:
-                        wf.setnchannels(1)
-                        wf.setsampwidth(2)
-                        wf.setframerate(24000)
-                        wf.writeframes(pcm_bytes)
+            },
+        },
+    }
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            pcm_b64 = data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
+            pcm_bytes = base64.b64decode(pcm_b64)
+            with wave.open(raw_wav_path, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(24000)
+                wf.writeframes(pcm_bytes)
+            return True
+        except Exception as e:
+            err_s = str(e)
+            if "400" in err_s and "temperature" in payload.get("generationConfig", {}):
+                payload["generationConfig"].pop("temperature", None)
+                continue
+            if "429" in err_s and attempt == 0:
+                print("[VOICE] Rate limit 429 no Gemini TTS, aguardando 22s antes de decidir...")
+                time.sleep(22)
+                continue
+            print(f"[VOICE] Aviso Gemini TTS ({e}).")
+            return False
+    return False
 
-                subprocess.run([
-                    FFMPEG_EXE, "-y", "-i", raw_wav,
-                    "-af", "silenceremove=start_periods=1:start_silence=0.04:start_threshold=-42dB,acompressor=threshold=-16dB:ratio=3:attack=5:release=50,volume=1.35",
-                    "-ar", "24000", "-ac", "1", output_wav_path
-                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if os.path.exists(raw_wav):
-                    os.remove(raw_wav)
-                print(f"[VOICE] Voz Realista Gemini TTS gerada: {output_wav_path} ({get_audio_duration(output_wav_path):.2f}s)")
-                time.sleep(2.5)
-                return output_wav_path
-            except Exception as e:
-                if "429" in str(e) and attempt < 2:
-                    wait_s = 62 if attempt == 0 else 45
-                    print(f"[VOICE] Rate limit 429 no Gemini TTS, aguardando {wait_s}s ({attempt+1}/3)...")
-                    time.sleep(wait_s)
-                    continue
-                print(f"[VOICE] Aviso Gemini TTS ({e}), usando Edge-TTS Neural Masterizado...")
-                break
 
+def _call_edge_tts(text, raw_mp3_path):
     import edge_tts
-    mp3_temp = output_wav_path + ".mp3"
 
     async def _run_edge():
-        comm = edge_tts.Communicate(text, "pt-BR-AntonioNeural", rate="+10%", pitch="-2Hz")
-        await comm.save(mp3_temp)
+        comm = edge_tts.Communicate(text, "pt-BR-AntonioNeural", rate="+12%", pitch="+0Hz")
+        await comm.save(raw_mp3_path)
 
     asyncio.run(_run_edge())
-    subprocess.run([
-        FFMPEG_EXE, "-y", "-i", mp3_temp,
-        "-af", "silenceremove=start_periods=1:start_silence=0.04:start_threshold=-45dB,equalizer=f=140:width_type=o:width=1.5:g=3.5,acompressor=threshold=-16dB:ratio=3:attack=5:release=50,volume=1.3",
-        "-ar", "24000", "-ac", "1", output_wav_path
-    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return raw_mp3_path
+
+
+def generate_realistic_voice(text, output_wav_path, style_hint=None):
+    gemini_key = get_secret("GEMINI_API_KEY", "1_GEMINI_API_KEY.txt")
+    raw_wav = output_wav_path + ".raw.wav"
+    persona = style_hint or UNIFIED_VOICE_PERSONA
+
+    if gemini_key and _call_gemini_tts(text, raw_wav, gemini_key, persona):
+        _master_voice_wav(raw_wav, output_wav_path)
+        if os.path.exists(raw_wav):
+            os.remove(raw_wav)
+        print(f"[VOICE] Gemini TTS padronizado: {output_wav_path} ({get_audio_duration(output_wav_path):.2f}s)")
+        return output_wav_path
+
+    mp3_temp = output_wav_path + ".mp3"
+    _call_edge_tts(text, mp3_temp)
+    _master_voice_wav(mp3_temp, output_wav_path)
     if os.path.exists(mp3_temp):
         os.remove(mp3_temp)
+    print(f"[VOICE] Edge-TTS Neural padronizado: {output_wav_path} ({get_audio_duration(output_wav_path):.2f}s)")
     return output_wav_path
+
+
+def generate_consistent_voices(texts_by_key, output_paths_by_key):
+    """
+    Gera todas as falas (hook, inter, outro) com o MESMO motor, MESMO timbre e
+    MESMA masterização (LUFS idêntico) — nunca mistura vozes diferentes no mesmo vídeo.
+    """
+    gemini_key = get_secret("GEMINI_API_KEY", "1_GEMINI_API_KEY.txt")
+    keys = list(texts_by_key.keys())
+
+    if gemini_key:
+        raw_files = {}
+        all_ok = True
+        for i, k in enumerate(keys):
+            raw_wav = output_paths_by_key[k] + ".raw.wav"
+            ok = _call_gemini_tts(texts_by_key[k], raw_wav, gemini_key, UNIFIED_VOICE_PERSONA)
+            if not ok:
+                all_ok = False
+                break
+            raw_files[k] = raw_wav
+            if i < len(keys) - 1:
+                time.sleep(2.0)
+
+        if all_ok:
+            for k in keys:
+                _master_voice_wav(raw_files[k], output_paths_by_key[k])
+                if os.path.exists(raw_files[k]):
+                    os.remove(raw_files[k])
+                print(f"[VOICE] Gemini TTS uniforme [{k}]: {output_paths_by_key[k]} ({get_audio_duration(output_paths_by_key[k]):.2f}s)")
+            return "gemini"
+
+        for p in raw_files.values():
+            if os.path.exists(p):
+                os.remove(p)
+        print("[VOICE] Padronizando 100% das falas em Edge-TTS Neural (evitando troca de voz no meio do vídeo)...")
+
+    for k in keys:
+        mp3_temp = output_paths_by_key[k] + ".mp3"
+        _call_edge_tts(texts_by_key[k], mp3_temp)
+        _master_voice_wav(mp3_temp, output_paths_by_key[k])
+        if os.path.exists(mp3_temp):
+            os.remove(mp3_temp)
+        print(f"[VOICE] Edge-TTS uniforme [{k}]: {output_paths_by_key[k]} ({get_audio_duration(output_paths_by_key[k]):.2f}s)")
+    return "edge"
 
 
 def _first_existing(candidates):
