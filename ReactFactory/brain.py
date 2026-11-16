@@ -88,27 +88,28 @@ def generate_react_script(video_path, original_title="Viral Video", original_des
         else "Analise visualmente cada frame em detalhe para reagir exatamente ao que acontece."
     )
 
-    prompt = f"""Você é um criador brasileiro carismático de YouTube Shorts de REACT focado em RETENÇÃO EXTREMA (taxa de swipe > 78% e retenção > 105%) e CONTEÚDO TRANSFORMATIVO (opinião real, contexto e humor próprio, zero repost genérico).
+    prompt = f"""Você é um estrategista e criador brasileiro TOP 1% de YouTube Shorts de REACT focado em BATER MILHÕES DE VIEWS (meta real: swipe rate > 82%, retenção média > 115% em loop e explosão de comentários) + CONTEÚDO TRANSFORMATIVO autêntico.
 Você está analisando 8 frames em ordem cronológica de um vídeo viral brasileiro de {duration:.1f} segundos.
 {audio_note}
 Título original do vídeo: "{original_title}"
 Contexto/Descrição original: "{original_desc}"
 
-REGRAS DE OURO (PROIBIDO CLICHÊS DE IA!):
-- NUNCA use frases robóticas como "Imagina a calma antes do caos", "Acompanhe essa reação", "Prepare-se para ver", "Você não vai acreditar", "Veja até o fim". Fale como um criador brasileiro espontâneo no microfone!
-- NÃO apenas descreva o óbvio na tela: traga OPINIÃO FORTE, contexto rápido, piada afiada ou um detalhe escondido que gera debate.
-- Frases ULTRA CURTAS para ritmo frenético e lip-sync perfeito nos 3 primeiros segundos.
+REGRAS DE OURO PARA RETENÇÃO ABSURDA (PROIBIDO CLICHÊS DE IA!):
+- NUNCA use frases robóticas ou genéricas: "Imagina a calma", "Ninguém esperava esse clima", "Acompanhe essa reação", "Prepare-se para ver", "Você não vai acreditar", "Veja até o fim".
+- Fale em português coloquial real do Brasil ("Mano", "Olha isso", "Peraí", "Como assim"), curto, direto e mantendo UM ÚNICO TOM firme e magnético do início ao fim.
+- REGRA DO GANCHO (0-2s): Nunca dê spoiler do clímax! Crie uma LACUNA DE CURIOSIDADE ou apontamento cirúrgico para um segundo/detalhe específico que obrigue quem está passando o dedo a ficar preso na tela.
+- REGRA DA INTERRUPÇÃO: Traga uma opinião forte, sarcasmo inteligente ou percepção que quem assistiu rápido não notou — nunca só descreva o óbvio!
 
 Crie as 3 intervenções afiadas:
-1. `hook_text` (MÁXIMO 8 palavras — ~2 segundos!): Gancho explosivo de curiosidade ou conflito logo no segundo 0 (ex: "Olha o erro absurdo aos quatro segundos!", "Esse cara achou mesmo que ia colar?").
-2. `interrupt_sec` (número decimal entre 4.5 e {min(max(duration - 3.5, 5.5), 15.5):.1f}): Momento exato antes da virada/clímax para congelar a tela e comentar.
-3. `interrupt_text` (MÁXIMO 11 palavras): Reação ou comentário editorial certeiro em cima da fala/ação antes do desfecho.
-4. `outro_text` (MÁXIMO 8 palavras): Fechamento seco com PERGUNTA POLARIZADORA para gerar comentários e prender o loop (ex: "Quem tá certo nessa história, 1 ou 2?", "Você faria igual ou corria?").
+1. `hook_text` (MÁXIMO 7 palavras — ~1.8s a 2.3s!): Gancho magnético nos 2 primeiros segundos prendendo atenção no detalhe/tensão (ex: "Olha a reação dela aos seis segundos!", "Mano, ninguém impediu esse cara a tempo?!", "Repara bem no que aparece atrás dele!").
+2. `interrupt_sec` (número decimal entre 4.5 e {min(max(duration - 3.5, 5.5), 15.5):.1f}): Segundo exato logo ANTES da grande virada/punchline para congelar a tela e aumentar o suspense.
+3. `interrupt_text` (MÁXIMO 9 palavras): Opinião afiada ou humor cirúrgico em cima da fala/ação que joga hype pro final (ex: "Nessa hora eu já tinha desligado o celular!", "Sério que ele achou que ia colar?!").
+4. `outro_text` (MÁXIMO 7 palavras): Fechamento rápido com PERGUNTA POLARIZADORA / DESAFIO DE NOTA que force comentários enquanto dá replay (ex: "Ele mandou bem ou passou vergonha?", "Nota zero a dez pra isso, comenta!").
 5. `reaction_mood`: Escolha EXATAMENTE UM entre: "chocado", "rindo", "pensativo", "impressionado".
-6. `headline_top` (MÁXIMO 4 palavras em MAIÚSCULAS): Lacuna de curiosidade SEM entregar o spoiler do final!
-7. `yt_title`: Título chamativo de alta taxa de clique em PT-BR com 1 emoji e #shorts #viral #react.
-8. `yt_description`: Legenda envolvente em PT-BR resumindo o corte + pergunta pros comentários + hashtags (#shorts #brasil #viral #react #trends).
-9. `yt_tags`: Lista com 7 a 10 tags estratégicas em português para alcance no YouTube Shorts Brasil.
+6. `headline_top` (MÁXIMO 4 palavras em MAIÚSCULAS): Pergunta tensa ou choque SEM entregar o final (ex: "ELE FEZ ISSO MESMO?!", "OLHA A CARA DELE", "NINGUÉM VIU O FINAL").
+7. `yt_title`: Título magnético estilo Shorts BR com alta taxa de clique + 1 emoji + #shorts #viral #react.
+8. `yt_description`: Resumo curto em PT-BR + pergunta polarizadora pros comentários + hashtags (#shorts #brasil #viral #react #memes #humor #trends).
+9. `yt_tags`: Lista com 8 a 10 tags estratégicas em português para alcance no YouTube Shorts Brasil.
 
 Responda APENAS com um JSON válido:
 {{
@@ -120,7 +121,7 @@ Responda APENAS com um JSON válido:
   "reaction_mood": "rindo",
   "yt_title": "...",
   "yt_description": "...",
-  "yt_tags": ["react", "shorts", "viral", "brasil", "humor", "curiosidades", "trends"]
+  "yt_tags": ["react", "shorts", "viral", "brasil", "humor", "memes", "curiosidades", "trends"]
 }}"""
 
     parts = [{"text": prompt}]
