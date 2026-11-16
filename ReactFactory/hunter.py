@@ -40,9 +40,28 @@ SOURCE_CHANNELS = [
     "@rezendeevil", "@FatosDesconhecidos", "@Podpah", "@FlowPodcast", "@felipeneto",
 ]
 
+TIKTOK_NICHE_POOLS = {
+    "memes_humor": [
+        "@portadosfundos", "@whinderssonnunes", "@t3ddy", "@juliococielo",
+        "@diogodefante", "@rafaelportugal", "@tirullipa", "@matheusceara",
+        "@brunalouise", "@afonso_padilha",
+    ],
+    "trends_acontecimentos": [
+        "@choquei", "@alfinetei", "@g1", "@metropoles",
+        "@cnnbrasil", "@uoloficial", "@razoesparaacreditar",
+    ],
+    "curiosidades_ciencia": [
+        "@manualdomundo", "@cienciatododia", "@vocesabia",
+        "@fatosdesconhecidos", "@almanaque.sos", "@superinteressante",
+    ],
+    "cortes_entretenimento": [
+        "@podpah", "@flowpodcast", "@inteligencialtda", "@ticaracaticast",
+        "@enaldinho", "@rezendeevil", "@casimito", "@loudgg",
+    ],
+}
+
 TIKTOK_CURATED_CREATORS = [
-    "@manualdomundo", "@cienciatododia", "@vocesabia", "@fatosdesconhecidos",
-    "@almanaque.sos", "@portadosfundos", "@enaldinho", "@t3ddy", "@podpah",
+    handle for handles in TIKTOK_NICHE_POOLS.values() for handle in handles
 ]
 
 BLOCKED_WORDS = [
@@ -216,41 +235,202 @@ def _ensure_h264_mp4(path):
     os.replace(tmp, path)
 
 
-def _hunt_tiktok_curated(output_path, used_ids):
-    """Fallback blindado usando criadores brasileiros verificados do TikTok (zero cookies)."""
+def _discover_open_tiktok_signals():
+    """
+    Descobre vídeos e perfis virais do TikTok no Brasil em ALTA AGORA, sem depender só de canais fixos:
+    combina Google Trends BR + Google News BR + Gemini Google Search Grounding em 5 nichos
+    (memes, humor, trends em alta, acontecimentos, curiosidades).
+    """
+    import xml.etree.ElementTree as ET
+
+    trends_topics = []
+    hdr = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"}
+
+    try:
+        req = urllib.request.Request("https://trends.google.com/trending/rss?geo=BR", headers=hdr)
+        with urllib.request.urlopen(req, timeout=8) as r:
+            root = ET.fromstring(r.read().decode("utf-8", errors="replace"))
+        trends_topics.extend(
+            it.findtext("title").strip() for it in root.findall(".//item")[:8] if it.findtext("title")
+        )
+    except Exception:
+        pass
+
+    news_queries = [
+        "tiktok viral brasil humor meme",
+        "video viralizou tiktok brasil hoje",
+        "trend tiktok brasil curiosidade acontecimento",
+    ]
+    news_snippets = []
+    try:
+        q = random.choice(news_queries)
+        url = f"https://news.google.com/rss/search?q={urllib.parse.quote(q)}&hl=pt-BR&gl=BR&ceid=BR:pt-419"
+        req = urllib.request.Request(url, headers=hdr)
+        with urllib.request.urlopen(req, timeout=8) as r:
+            root = ET.fromstring(r.read().decode("utf-8", errors="replace"))
+        for it in root.findall(".//item")[:8]:
+            t = (it.findtext("title") or "").strip()
+            if t and not _is_blocked(t):
+                news_snippets.append(t)
+    except Exception:
+        pass
+
+    video_urls = []
+    handles = []
+    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not gemini_key:
+        sec = os.path.join(ROOT_DIR, "_render_secrets", "1_GEMINI_API_KEY.txt")
+        if os.path.exists(sec):
+            with open(sec, "r", encoding="utf-8") as f:
+                gemini_key = f.read().strip()
+
+    if gemini_key:
+        pillars = random.sample(
+            [
+                "memes e humor viral brasileiro",
+                "trends em alta no TikTok Brasil",
+                "acontecimentos curiosos e flagras divertidos no Brasil",
+                "curiosidades chocantes e ciência viral no Brasil",
+                "cortes engraçados e resenhas virais brasileiras",
+            ],
+            k=2,
+        )
+        context_hint = ", ".join((trends_topics[:4] + news_snippets[:3])[:5])
+        prompt = (
+            f"Encontre vídeos recentes e altamente virais no TikTok Brasil ligados a: "
+            f"{pillars[0]} e {pillars[1]}. "
+            f"Assuntos em alta agora no Brasil para inspiração: {context_hint}. "
+            "Retorne URLs diretas reais no formato https://www.tiktok.com/@usuario/video/ID "
+            "de qualquer criador brasileiro (memes, humor, trends, acontecimentos, curiosidades — "
+            "proibido tragédias ou crimes) e mencione os @perfis virais relevantes."
+        )
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "tools": [{"google_search": {}}],
+            "generationConfig": {"temperature": 0.4},
+        }
+        try:
+            req = urllib.request.Request(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=22) as resp:
+                raw_txt = resp.read().decode("utf-8", errors="replace")
+            video_urls = list(dict.fromkeys(
+                re.findall(r"https://(?:www\.)?tiktok\.com/@[\w.-]+/video/\d+", raw_txt)
+            ))
+            raw_handles = re.findall(r"tiktok\.com/(@[\w.-]+)", raw_txt) + re.findall(r"(?<!\w)(@[a-zA-Z0-9_.]{3,28})", raw_txt)
+            bad_handles = {"@usuario", "@tiktok", "@gmail", "@gmail.com", "@youtube", "@instagram"}
+            for h in raw_handles:
+                hl = h.lower()
+                if hl not in bad_handles and hl not in handles and not hl.endswith(".com"):
+                    handles.append(hl)
+        except Exception as err:
+            print(f"[HUNTER TIKTOK BR] Aviso busca aberta Gemini: {err}")
+
+    print(
+        f"[HUNTER TIKTOK BR] Descoberta aberta: {len(video_urls)} URLs diretas | "
+        f"{len(handles)} @perfis descobertos | Trends={trends_topics[:3]}"
+    )
+    return video_urls[:10], handles[:10]
+
+
+def _score_tiktok_entry(e, used_ids, source_label, discovery_boost=1.0):
+    vid = str(e.get("id") or "")
+    if not vid or vid in used_ids or f"tt_{vid}" in used_ids:
+        return None
+    title = (e.get("title") or e.get("description") or "").strip()
+    if _is_blocked(title) or _looks_non_brazilian({"title": title, "description": e.get("description") or ""}):
+        return None
+    dur = e.get("duration") or 0
+    if dur and not (10 <= dur <= 56):
+        return None
+    v = int(e.get("view_count") or 0)
+    if v and v < 25_000 and discovery_boost <= 1.0:
+        return None
+
+    vpd, age = _views_per_day(e)
+    if age < 9000 and age > 45:
+        return None
+    if vpd <= 0:
+        vpd = float(v or 50_000) / max(age if age < 9000 else 5.0, 1.0)
+        age = age if age < 9000 else 5.0
+
+    recency_bonus = 3.5 if age <= 3.0 else (2.1 if age <= 7.0 else (1.25 if age <= 15.0 else 0.7))
+    dur_bonus = 1.30 if 12 <= dur <= 34 else 1.0
+    score = max(vpd, 10_000.0) * recency_bonus * dur_bonus * discovery_boost
+    return (score, v, vpd, age, source_label, e)
+
+
+def _hunt_tiktok_viral(output_path, used_ids):
+    """
+    Minera vídeos virais brasileiros NO TIKTOK abrangendo memes, humor, trends em alta,
+    acontecimentos e curiosidades — combinando busca aberta canal-agnóstica + pool multi-nichos.
+    """
     import yt_dlp
-    print("[HUNTER TIKTOK BR] Acionando mineração segura em perfis brasileiros curados...")
+
+    print("[HUNTER TIKTOK BR] Minerando virais em alta no TikTok (memes, humor, trends, acontecimentos, curiosidades)...")
+    open_urls, open_handles = _discover_open_tiktok_signals()
+
     flat_opts = {
         "quiet": True, "no_warnings": True, "extract_flat": "in_playlist",
         "ignoreerrors": True, "skip_download": True, "playlistend": 8,
     }
-    creators = list(TIKTOK_CURATED_CREATORS)
-    random.shuffle(creators)
+    info_opts = {
+        "quiet": True, "no_warnings": True, "ignoreerrors": True, "skip_download": True,
+    }
+
+    # Seleciona perfis balanceados entre TODOS os nichos + perfis descobertos dinamicamente
+    sampled_creators = list(open_handles[:4])
+    for niche_handles in TIKTOK_NICHE_POOLS.values():
+        picks = random.sample(niche_handles, k=min(2, len(niche_handles)))
+        for p in picks:
+            if p not in sampled_creators:
+                sampled_creators.append(p)
+    random.shuffle(sampled_creators)
+
     candidates = []
+    seen_vids = set()
+
+    if open_urls:
+        with yt_dlp.YoutubeDL(info_opts) as ydl_one:
+            for u in open_urls[:6]:
+                try:
+                    info = ydl_one.extract_info(u, download=False)
+                    if not info:
+                        continue
+                    scored = _score_tiktok_entry(info, used_ids, "TikTok Busca Aberta", discovery_boost=1.6)
+                    if scored and str(info.get("id")) not in seen_vids:
+                        seen_vids.add(str(info.get("id")))
+                        candidates.append(scored)
+                except Exception:
+                    pass
+
     with yt_dlp.YoutubeDL(flat_opts) as ydl:
-        for creator in creators[:6]:
+        for creator in sampled_creators[:10]:
             try:
                 res = ydl.extract_info(f"https://www.tiktok.com/{creator}", download=False) or {}
                 for e in (res.get("entries") or []):
                     vid = str(e.get("id") or "")
-                    if not vid or vid in used_ids or _is_blocked(e.get("title")):
+                    if not vid or vid in seen_vids:
                         continue
-                    dur = e.get("duration") or 0
-                    if dur and not (10 <= dur <= 58):
-                        continue
-                    v = e.get("view_count") or 0
-                    candidates.append((v, creator, e))
+                    scored = _score_tiktok_entry(e, used_ids, f"TikTok {creator}", discovery_boost=1.0)
+                    if scored:
+                        seen_vids.add(vid)
+                        candidates.append(scored)
             except Exception as err:
                 print(f"[HUNTER TIKTOK BR] Aviso {creator}: {err}")
 
     candidates.sort(key=lambda x: x[0], reverse=True)
-    for v, creator, e in candidates[:12]:
+    for score, v, vpd, age, src_label, e in candidates[:14]:
         u = e.get("url") or e.get("webpage_url")
         if not u:
             continue
         vid = str(e["id"])
-        title = (e.get("title") or f"Vídeo de {creator}").strip()
-        print(f"[HUNTER TIKTOK BR] Baixando {creator}: {title[:70]} ({v:,} views)")
+        title = (e.get("title") or e.get("description") or f"Viral {src_label}").strip()
+        print(f"[HUNTER TIKTOK BR] Baixando ({src_label}): {title[:65]} | {v:,} views | {age:.1f}d | {vpd:,.0f} v/d")
         if os.path.exists(output_path):
             os.remove(output_path)
         dl_opts = {
@@ -264,20 +444,24 @@ def _hunt_tiktok_curated(output_path, used_ids):
                 _ensure_h264_mp4(output_path)
                 return {
                     "id": f"tt_{vid}",
-                    "source": f"TikTok {creator}",
+                    "source": src_label,
                     "title": title,
                     "description": (e.get("description") or title)[:800],
                     "duration": e.get("duration") or 25,
                     "views": int(v),
-                    "views_per_day": int(v),
-                    "age_days": 1.0,
-                    "outlier_score": 2.0,
+                    "views_per_day": int(vpd),
+                    "age_days": round(age, 1),
+                    "outlier_score": round(min(5.0, vpd / 50_000.0), 2),
                     "url": u,
                     "path": output_path,
                 }
         except Exception as err:
             print(f"[HUNTER TIKTOK BR] Falhou download ({err}), próximo...")
     return None
+
+
+def _hunt_tiktok_curated(output_path, used_ids):
+    return _hunt_tiktok_viral(output_path, used_ids)
 
 
 def hunt_viral_video(output_path=None, max_age_days=15):
@@ -292,6 +476,10 @@ def hunt_viral_video(output_path=None, max_age_days=15):
     import yt_dlp
 
     used_ids = set(load_history().get("used_ids", []))
+    tt_res = _hunt_tiktok_viral(output_path, used_ids)
+    if tt_res:
+        return tt_res
+
     hdrs = {"Accept-Language": "pt-BR,pt;q=0.9"}
     flat_opts = {
         "quiet": True, "no_warnings": True, "extract_flat": "in_playlist",
@@ -410,10 +598,6 @@ def hunt_viral_video(output_path=None, max_age_days=15):
                 "url": full["webpage_url"],
                 "path": output_path,
             }
-
-    tt_res = _hunt_tiktok_curated(output_path, used_ids)
-    if tt_res:
-        return tt_res
 
     raise RuntimeError("Nenhum viral brasileiro recente encontrado.")
 
