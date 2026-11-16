@@ -10,7 +10,7 @@ from hunter import hunt_viral_video, save_history
 from brain import generate_react_script
 from sfx import ensure_sfx
 from voice_and_avatar import (
-    generate_realistic_voice,
+    generate_consistent_voices,
     pick_avatar_clips,
     generate_batch_lipsync_clips,
 )
@@ -51,18 +51,18 @@ def run_pipeline(do_upload=False):
     inter_wav = os.path.join(TEMP_DIR, "voice_inter.wav")
     outro_wav = os.path.join(TEMP_DIR, "voice_outro.wav")
 
-    mood = script_data.get("reaction_mood", "chocado")
-    tone_styles = {
-        "rindo": ("bem-humorado, rindo e super espontâneo", "rachando o bico apontando a cena", "zoeiro chamando a galera pra comentar"),
-        "chocado": ("chocado, incrédulo e com muita energia", "muito surpreso revelando o detalhe absurdo", "intrigado perguntando o que o público achou"),
-        "pensativo": ("curioso, intrigado e misterioso", "revelando um detalhe que ninguém reparou", "provocativo perguntando a opinião do público"),
-        "impressionado": ("empolgado, admirado e vibrante", "admirado destacando o ponto mais insano", "entusiasmado puxando o público pros comentários"),
-    }
-    h_style, i_style, o_style = tone_styles.get(mood, tone_styles["chocado"])
-
-    generate_realistic_voice(script_data["hook_text"], hook_wav, h_style)
-    generate_realistic_voice(script_data["interrupt_text"], inter_wav, i_style)
-    generate_realistic_voice(script_data["outro_text"], outro_wav, o_style)
+    generate_consistent_voices(
+        {
+            "hook": script_data["hook_text"],
+            "inter": script_data["interrupt_text"],
+            "outro": script_data["outro_text"],
+        },
+        {
+            "hook": hook_wav,
+            "inter": inter_wav,
+            "outro": outro_wav,
+        },
+    )
 
     synced = generate_batch_lipsync_clips(
         hook_wav=hook_wav,
