@@ -160,7 +160,7 @@ def _call_gemini_tts(text, raw_wav_path, gemini_key, persona_prompt=UNIFIED_VOIC
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=45) as resp:
+            with urllib.request.urlopen(req, timeout=75) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             pcm_b64 = data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
             pcm_bytes = base64.b64decode(pcm_b64)
