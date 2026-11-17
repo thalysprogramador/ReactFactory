@@ -2,6 +2,7 @@ import os
 import random
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
@@ -158,16 +159,51 @@ def _make_hud_top_png(act_num, total_acts, callout, out_png):
     return out_png
 
 
-def _render_visual_plate(dur, mp4_pool, jpg_pool, idx_cursor, hud_png, out_silent_mp4, work_dir, tag):
+def _render_kenburns_cv2(img_path, dur, out_mp4, zoom_in=True, fps=24):
+    """Renderiza zoom/pan cinematográfico 1920x1080 via OpenCV+FFmpeg (~70x mais rápido que zoompan)."""
+    src = cv2.imread(img_path)
+    if src is None:
+        src = np.full((1080, 1920, 3), 24, dtype=np.uint8)
+    else:
+        sh, sw = src.shape[:2]
+        sc = max(1920.0 / sw, 1080.0 / sh)
+        nw, nh = max(1920, int(round(sw * sc))), max(1080, int(round(sh * sc)))
+        src = cv2.resize(src, (nw, nh), interpolation=cv2.INTER_AREA)
+        x0, y0 = (nw - 1920) // 2, (nh - 1080) // 2
+        src = src[y0:y0 + 1080, x0:x0 + 1920].copy()
+
+    n_frames = max(24, int(round(dur * fps)))
+    proc = subprocess.Popen([
+        FFMPEG_EXE, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", "1920x1080", "-r", str(fps), "-i", "pipe:0",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "19", "-pix_fmt", "yuv420p",
+        "-video_track_timescale", "24000", "-an",
+        out_mp4,
+    ], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for i in range(n_frames):
+        p = i / float(max(1, n_frames - 1))
+        z = (1.0 + 0.14 * p) if zoom_in else (1.14 - 0.12 * p)
+        cw, ch = max(2, int(1920 / z)), max(2, int(1080 / z))
+        cx, cy = (1920 - cw) // 2, (1080 - ch) // 2
+        fr = cv2.resize(src[cy:cy + ch, cx:cx + cw], (1920, 1080), interpolation=cv2.INTER_LINEAR)
+        proc.stdin.write(fr.tobytes())
+    proc.stdin.close()
+    rc = proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"FFmpeg KenBurns falhou (rc={rc}) em {img_path}")
+    return out_mp4
+
+
+def _render_visual_plate(dur, mp4_pool, jpg_pool, idx_cursor, out_raw_mp4, work_dir, tag, seed=0):
     """
-    Gera o vídeo visual 1920x1080@30fps de um bloco (~16-20s) trocando de cena a cada ~4.5-6s,
-    alternando MP4s oficiais da Rockstar e animações Ken Burns de screenshots 4K.
+    Gera o vídeo visual 1920x1080@24fps de um bloco (~15-20s) trocando de cena a cada ~4.4-6s,
+    alternando MP4s oficiais da Rockstar e animações Ken Burns rápidas de screenshots 4K.
     """
+    rng = random.Random(seed)
     sub_clips = []
     remaining = dur
     sub_idx = 0
     while remaining > 0.1:
-        span = min(remaining, random.uniform(4.4, 6.2))
+        span = min(remaining, rng.uniform(4.4, 6.2))
         if remaining - span < 2.2:
             span = remaining
         seg_p = os.path.join(work_dir, f"vis_{tag}_{sub_idx}.mp4")
@@ -175,24 +211,17 @@ def _render_visual_plate(dur, mp4_pool, jpg_pool, idx_cursor, hud_png, out_silen
         if use_mp4:
             src_v = mp4_pool[(idx_cursor + sub_idx) % len(mp4_pool)]
             src_dur = max(1.0, get_media_duration(src_v))
-            ss = random.uniform(0.0, max(0.0, src_dur - span - 0.2)) if src_dur > span + 0.5 else 0.0
+            ss = rng.uniform(0.0, max(0.0, src_dur - span - 0.2)) if src_dur > span + 0.5 else 0.0
             subprocess.run([
                 FFMPEG_EXE, "-y", "-stream_loop", "-1", "-ss", f"{ss:.2f}", "-i", src_v,
                 "-t", f"{span:.2f}",
-                "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,eq=contrast=1.05:saturation=1.10,fps=30,setsar=1",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-an",
+                "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,eq=contrast=1.05:saturation=1.10,fps=24,setsar=1",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "19", "-pix_fmt", "yuv420p", "-an",
                 seg_p,
             ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             src_img = jpg_pool[(idx_cursor + sub_idx) % len(jpg_pool)]
-            frames_n = max(30, int(round(span * 30)))
-            zoom_expr = "min(zoom+0.0014,1.16)" if sub_idx % 4 == 1 else "if(eq(on,1),1.15,max(1.0,zoom-0.0012))"
-            subprocess.run([
-                FFMPEG_EXE, "-y", "-loop", "1", "-t", f"{span:.2f}", "-i", src_img,
-                "-vf", f"scale=2560:1440:force_original_aspect_ratio=increase,crop=2560:1440,zoompan=z='{zoom_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames_n}:s=1920x1080:fps=30,eq=contrast=1.05:saturation=1.10,setsar=1",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-an",
-                seg_p,
-            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            _render_kenburns_cv2(src_img, span, seg_p, zoom_in=(sub_idx % 4 == 1), fps=24)
         sub_clips.append(seg_p)
         remaining -= span
         sub_idx += 1
@@ -201,17 +230,8 @@ def _render_visual_plate(dur, mp4_pool, jpg_pool, idx_cursor, hud_png, out_silen
     with open(ct, "w", encoding="utf-8") as f:
         for sp in sub_clips:
             f.write(f"file '{os.path.abspath(sp).replace(chr(92), '/')}'\n")
-    raw_vis = os.path.join(work_dir, f"vis_{tag}_raw.mp4")
-    subprocess.run([FFMPEG_EXE, "-y", "-f", "concat", "-safe", "0", "-i", ct, "-c", "copy", raw_vis], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    subprocess.run([
-        FFMPEG_EXE, "-y", "-i", raw_vis, "-i", hud_png,
-        "-filter_complex", "[0:v][1:v]overlay=0:0,format=yuv420p[v]",
-        "-map", "[v]", "-t", f"{dur:.2f}",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-r", "30", "-an",
-        out_silent_mp4,
-    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return out_silent_mp4, sub_idx
+    subprocess.run([FFMPEG_EXE, "-y", "-f", "concat", "-safe", "0", "-i", ct, "-c", "copy", out_raw_mp4], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return out_raw_mp4, sub_idx
 
 
 def build_gta6_long_thumbnail(jpg_vault, thumb_text, out_jpg):
@@ -273,7 +293,8 @@ def compose_gta6_long_video(script_data, wav_map, mp4_vault, jpg_vault, work_dir
 
     acts = script_data["acts"]
     total_acts = len(acts)
-    segments = []
+    ordered_segments = []
+    block_jobs = []
     idx_cursor = 0
     chapters_ts = []
     total_t = 0.0
@@ -294,20 +315,19 @@ def compose_gta6_long_video(script_data, wav_map, mp4_vault, jpg_vault, work_dir
         card_jpg = os.path.join(work_dir, f"act_{act_num}_card.jpg")
         bg_img = jpg_vault[a_idx % len(jpg_vault)] if jpg_vault else None
         _make_chapter_card_jpg(act_num, act_title, bg_img, card_jpg)
+        card_vis = os.path.join(work_dir, f"card_act{act_num:02d}_vis.mp4")
+        _render_kenburns_cv2(card_jpg, 2.20, card_vis, zoom_in=True, fps=24)
         card_mp4 = os.path.join(work_dir, f"seg_act{act_num:02d}_00_card.mp4")
         subprocess.run([
-            FFMPEG_EXE, "-y", "-loop", "1", "-t", "2.20", "-i", card_jpg,
+            FFMPEG_EXE, "-y", "-i", card_vis,
             "-i", sfx_whoosh, "-stream_loop", "-1", "-i", bgm_file,
-            "-filter_complex", (
-                "[0:v]scale=2112:1188,zoompan=z='min(zoom+0.002,1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=66:s=1920x1080:fps=30,format=yuv420p[v];"
-                "[1:a]volume=0.55[s];[2:a]atrim=0:2.20,volume=1.10[b];[s][b]amix=inputs=2:duration=longest:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[a]"
-            ),
-            "-map", "[v]", "-map", "[a]", "-t", "2.20",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-r", "30",
-            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-video_track_timescale", "30000",
+            "-filter_complex", "[1:a]volume=0.55[s];[2:a]atrim=0:2.20,volume=1.10[b];[s][b]amix=inputs=2:duration=longest:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[a]",
+            "-map", "0:v", "-map", "[a]", "-t", "2.20",
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-video_track_timescale", "24000",
             card_mp4,
         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        segments.append(card_mp4)
+        ordered_segments.append(card_mp4)
         total_t += 2.20
 
         bgm_offset = 2.2
@@ -315,58 +335,86 @@ def compose_gta6_long_video(script_data, wav_map, mp4_vault, jpg_vault, work_dir
             bid = f"a{act_num}_b{b_idx}"
             wav_p = wav_map[bid]
             dur = max(2.2, get_media_duration(wav_p) + 0.18)
-
-            hud_png = os.path.join(work_dir, f"hud_{bid}.png")
-            _make_hud_top_png(act_num, total_acts, blk.get("callout", ""), hud_png)
-
-            vis_silent = os.path.join(work_dir, f"vis_{bid}_silent.mp4")
-            _, used_sub = _render_visual_plate(dur, mp4_vault, jpg_vault, idx_cursor, hud_png, vis_silent, work_dir, bid)
-            idx_cursor += used_sub
-
-            # Sobrepõe legendas profissionais sincronizadas + mixa narração (-14.5 LUFS) + trilha sonora do Ato
-            chunks = _split_sub_chunks(blk["narration"], dur)
-            sub_inputs = []
-            ov_parts = []
-            cur_lbl = "0:v"
-            for ci, (ctext, t0, t1) in enumerate(chunks):
-                sp = os.path.join(work_dir, f"sub_{bid}_{ci}.png")
-                _make_doc_subtitle_png(ctext, blk.get("callout", ""), sp)
-                sub_inputs += ["-i", sp]
-                inp_i = 4 + ci
-                nxt = f"sv_{ci}"
-                ov_parts.append(f"[{cur_lbl}][{inp_i}:v]overlay=0:0:enable='between(t,{t0:.2f},{t1:.2f})'[{nxt}]")
-                cur_lbl = nxt
-            ov_parts.append(f"[{cur_lbl}]format=yuv420p[vout]")
-
-            bgm_ss = bgm_offset % max(2.0, bgm_dur - dur - 2.0)
-            fade_st = max(0.0, dur - 0.35)
-            sfx_p = sfx_pop if b_idx > 0 else sfx_freeze
-            aud_fc = (
-                f"[1:a]volume=1.18[vo];"
-                f"[2:a]atrim=0:{dur:.2f},afade=t=in:st=0:d=0.25,afade=t=out:st={fade_st:.2f}:d=0.35,volume=0.88[bm];"
-                f"[3:a]volume=0.28[sx];"
-                f"[vo][bm][sx]amix=inputs=3:duration=first:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[aout]"
-            )
-
             seg_out = os.path.join(work_dir, f"seg_{act_num:02d}_{b_idx:02d}.mp4")
-            cmd = [
-                FFMPEG_EXE, "-y",
-                "-i", vis_silent,
-                "-i", wav_p,
-                "-stream_loop", "-1", "-ss", f"{bgm_ss:.2f}", "-i", bgm_file,
-                "-i", sfx_p,
-            ] + sub_inputs + [
-                "-filter_complex", ";".join(ov_parts) + ";" + aud_fc,
-                "-map", "[vout]", "-map", "[aout]", "-t", f"{dur:.2f}",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-r", "30",
-                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-video_track_timescale", "30000",
-                seg_out,
-            ]
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            segments.append(seg_out)
+            ordered_segments.append(seg_out)
+            bgm_ss = bgm_offset % max(2.0, bgm_dur - dur - 2.0)
+            block_jobs.append({
+                "bid": bid,
+                "act_num": act_num,
+                "b_idx": b_idx,
+                "blk": blk,
+                "wav_p": wav_p,
+                "dur": dur,
+                "idx_cursor": idx_cursor,
+                "bgm_file": bgm_file,
+                "bgm_ss": bgm_ss,
+                "seg_out": seg_out,
+                "seed": a_idx * 100 + b_idx,
+            })
+            idx_cursor += max(3, int(dur // 4.5) + 1)
             bgm_offset += dur
             total_t += dur
 
+    def _render_one_block(job):
+        bid = job["bid"]
+        dur = job["dur"]
+        blk = job["blk"]
+        hud_png = os.path.join(work_dir, f"hud_{bid}.png")
+        _make_hud_top_png(job["act_num"], total_acts, blk.get("callout", ""), hud_png)
+
+        raw_vis = os.path.join(work_dir, f"vis_{bid}_raw.mp4")
+        _render_visual_plate(dur, mp4_vault, jpg_vault, job["idx_cursor"], raw_vis, work_dir, bid, seed=job["seed"])
+
+        chunks = _split_sub_chunks(blk["narration"], dur)
+        sub_inputs = ["-i", hud_png]
+        ov_parts = ["[0:v][4:v]overlay=0:0[vhud]"]
+        cur_lbl = "vhud"
+        for ci, (ctext, t0, t1) in enumerate(chunks):
+            sp = os.path.join(work_dir, f"sub_{bid}_{ci}.png")
+            _make_doc_subtitle_png(ctext, blk.get("callout", ""), sp)
+            sub_inputs += ["-i", sp]
+            inp_i = 5 + ci
+            nxt = f"sv_{ci}"
+            ov_parts.append(f"[{cur_lbl}][{inp_i}:v]overlay=0:0:enable='between(t,{t0:.2f},{t1:.2f})'[{nxt}]")
+            cur_lbl = nxt
+        ov_parts.append(f"[{cur_lbl}]format=yuv420p[vout]")
+
+        fade_st = max(0.0, dur - 0.35)
+        sfx_p = sfx_pop if job["b_idx"] > 0 else sfx_freeze
+        aud_fc = (
+            f"[1:a]volume=1.18[vo];"
+            f"[2:a]atrim=0:{dur:.2f},afade=t=in:st=0:d=0.25,afade=t=out:st={fade_st:.2f}:d=0.35,volume=0.88[bm];"
+            f"[3:a]volume=0.28[sx];"
+            f"[vo][bm][sx]amix=inputs=3:duration=first:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[aout]"
+        )
+
+        cmd = [
+            FFMPEG_EXE, "-y",
+            "-i", raw_vis,
+            "-i", job["wav_p"],
+            "-stream_loop", "-1", "-ss", f"{job['bgm_ss']:.2f}", "-i", job["bgm_file"],
+            "-i", sfx_p,
+        ] + sub_inputs + [
+            "-filter_complex", ";".join(ov_parts) + ";" + aud_fc,
+            "-map", "[vout]", "-map", "[aout]", "-t", f"{dur:.2f}",
+            "-c:v", "libx264", "-preset", "superfast", "-crf", "20", "-r", "24",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-video_track_timescale", "24000",
+            job["seg_out"],
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return bid
+
+    print(f"[GTA6 LONG COMPOSER] Renderizando {len(block_jobs)} blocos em paralelo (1080p24 + HUD + legendas + 4 trilhas)...", flush=True)
+    done_cnt = 0
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futs = [pool.submit(_render_one_block, job) for job in block_jobs]
+        for fut in as_completed(futs):
+            fut.result()
+            done_cnt += 1
+            if done_cnt % 5 == 0 or done_cnt == len(block_jobs):
+                print(f"[GTA6 LONG COMPOSER] Cenas prontas: {done_cnt}/{len(block_jobs)}", flush=True)
+
+    segments = ordered_segments
     concat_txt = os.path.join(work_dir, "gta6_long_concat.txt")
     with open(concat_txt, "w", encoding="utf-8") as f:
         for s in segments:
