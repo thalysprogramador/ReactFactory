@@ -111,3 +111,93 @@ def upload_short_to_youtube(video_path, title, description, tags=None, privacy_s
         yt_id = result.get("id")
         print(f"[UPLOADER] Short publicado com sucesso! https://youtube.com/shorts/{yt_id}")
         return yt_id
+
+
+def set_video_thumbnail(video_id, thumb_path, access_token=None):
+    """Define thumbnail customizada (1280x720) para vídeo longo no YouTube."""
+    if not access_token:
+        access_token = get_youtube_access_token(1)
+    with open(thumb_path, "rb") as tf:
+        img_bytes = tf.read()
+    ctype = "image/png" if thumb_path.lower().endswith(".png") else "image/jpeg"
+    url = f"https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId={urllib.parse.quote(video_id)}&uploadType=media"
+    req = urllib.request.Request(
+        url,
+        data=img_bytes,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": ctype,
+            "Content-Length": str(len(img_bytes)),
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=45) as resp:
+        res = json.loads(resp.read().decode("utf-8"))
+        print(f"[UPLOADER] Thumbnail aplicada ao vídeo {video_id}!")
+        return res
+
+
+def upload_long_to_youtube(video_path, title, description, tags=None, thumb_path=None, privacy_status="public"):
+    """
+    Faz upload de vídeo longo 16:9 sem injetar #shorts no título e aplica thumbnail customizada.
+    """
+    access_token = get_youtube_access_token(1)
+
+    metadata = {
+        "snippet": {
+            "title": (title or "TOP VIRAIS DA SEMANA!")[:100],
+            "description": description or "",
+            "tags": (tags or ["react", "virais", "humor", "brasil"])[:25],
+            "categoryId": "24",
+            "defaultLanguage": "pt-BR",
+            "defaultAudioLanguage": "pt-BR",
+        },
+        "status": {
+            "privacyStatus": privacy_status,
+            "selfDeclaredMadeForKids": False,
+        },
+    }
+
+    init_url = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
+    body_bytes = json.dumps(metadata).encode("utf-8")
+    file_size = os.path.getsize(video_path)
+
+    req_init = urllib.request.Request(
+        init_url,
+        data=body_bytes,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Length": str(file_size),
+            "X-Upload-Content-Type": "video/mp4",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req_init, timeout=45) as resp:
+        upload_url = resp.headers.get("Location")
+
+    with open(video_path, "rb") as vf:
+        video_bytes = vf.read()
+
+    req_upload = urllib.request.Request(
+        upload_url,
+        data=video_bytes,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Length": str(file_size),
+            "Content-Type": "video/mp4",
+        },
+        method="PUT",
+    )
+    with urllib.request.urlopen(req_upload, timeout=600) as resp:
+        result = json.loads(resp.read().decode("utf-8"))
+        yt_id = result.get("id")
+        print(f"[UPLOADER] Vídeo longo publicado com sucesso! https://www.youtube.com/watch?v={yt_id}")
+
+    if thumb_path and os.path.exists(thumb_path) and yt_id:
+        try:
+            set_video_thumbnail(yt_id, thumb_path, access_token=access_token)
+        except Exception as err:
+            print(f"[UPLOADER] Aviso ao enviar thumbnail: {err}")
+
+    return yt_id
