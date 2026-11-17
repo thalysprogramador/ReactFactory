@@ -187,16 +187,31 @@ def build_short_thumbnail(viral_video_path, headline_text, reaction_video_path, 
 
 
 class VideoClipReader:
-    def __init__(self, path):
+    def __init__(self, path, max_dim=1280, max_frames=None, compress=True):
         self.path = path
         self.cap = cv2.VideoCapture(path)
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 25.0
+        self.compress = compress
         self.frames = []
+        self._last_idx = -1
+        self._last_frame = None
         while True:
             ret, f = self.cap.read()
             if not ret:
                 break
-            self.frames.append(f)
+            if max_dim:
+                fh, fw = f.shape[:2]
+                biggest = max(fh, fw)
+                if biggest > max_dim:
+                    scale = max_dim / float(biggest)
+                    f = cv2.resize(f, (max(2, int(fw * scale)), max(2, int(fh * scale))), interpolation=cv2.INTER_AREA)
+            if compress:
+                ok, buf = cv2.imencode(".jpg", f, [cv2.IMWRITE_JPEG_QUALITY, 92])
+                self.frames.append(buf if ok else f)
+            else:
+                self.frames.append(f)
+            if max_frames and len(self.frames) >= max_frames:
+                break
         self.cap.release()
         if not self.frames:
             raise RuntimeError(f"Não foi possível ler frames de {path}")
@@ -212,7 +227,18 @@ class VideoClipReader:
             idx = idx % n
         else:
             idx = min(max(0, idx), n - 1)
-        return self.frames[idx]
+        if idx == self._last_idx and self._last_frame is not None:
+            return self._last_frame
+        item = self.frames[idx]
+        if isinstance(item, np.ndarray) and item.ndim == 1:
+            frame = cv2.imdecode(item, cv2.IMREAD_COLOR)
+        elif self.compress and item.ndim <= 2:
+            frame = cv2.imdecode(item, cv2.IMREAD_COLOR)
+        else:
+            frame = item
+        self._last_idx = idx
+        self._last_frame = frame
+        return frame
 
 
 def compose_react_short(
@@ -253,12 +279,12 @@ def compose_react_short(
 
     print(f"[COMPOSER] Linha do tempo: Hook={hook_dur:.1f}s | Parte1={part1_dur:.1f}s | Interrupção={inter_dur:.1f}s | Clímax={part2_dur:.1f}s | Total={t_total:.1f}s")
 
-    viral_reader = VideoClipReader(viral_video_path)
-    hook_reader = VideoClipReader(hook_avatar_mp4)
-    inter_reader = VideoClipReader(interrupt_avatar_mp4)
-    outro_reader = VideoClipReader(outro_avatar_mp4)
-    idle_reader = VideoClipReader(idle_avatar_mp4)
-    idle_reader_2 = VideoClipReader(idle_avatar_mp4_2) if idle_avatar_mp4_2 else idle_reader
+    viral_reader = VideoClipReader(viral_video_path, max_dim=1440, compress=True)
+    hook_reader = VideoClipReader(hook_avatar_mp4, max_dim=960, compress=True)
+    inter_reader = VideoClipReader(interrupt_avatar_mp4, max_dim=960, compress=True)
+    outro_reader = VideoClipReader(outro_avatar_mp4, max_dim=960, compress=True)
+    idle_reader = VideoClipReader(idle_avatar_mp4, max_dim=960, max_frames=160, compress=True)
+    idle_reader_2 = VideoClipReader(idle_avatar_mp4_2, max_dim=960, max_frames=160, compress=True) if idle_avatar_mp4_2 else idle_reader
 
     headline = script_data.get("headline_top", "ESPERA SÓ ATÉ O FINAL!")
     hook_words = script_data.get("hook_text", "").split()
@@ -366,6 +392,7 @@ def compose_react_short(
         writer.write(canvas)
 
     writer.release()
+    del viral_reader, hook_reader, inter_reader, outro_reader, idle_reader, idle_reader_2
 
     v_aud_p1 = os.path.join(TEMP_DIR, "v_aud_p1.wav")
     v_aud_p2 = os.path.join(TEMP_DIR, "v_aud_p2.wav")
