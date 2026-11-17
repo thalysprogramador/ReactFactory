@@ -45,7 +45,7 @@ jobs:
           YOUTUBE_TOKEN_BASE64: ${{ secrets.YOUTUBE_TOKEN_BASE64 }}
           YOUTUBE_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
         run: |
-          python ReactFactory/main_pipeline.py --upload
+          python -u ReactFactory/main_pipeline.py --upload
 
       - name: Save Video History to Repository
         run: |
