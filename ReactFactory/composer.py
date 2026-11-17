@@ -1,3 +1,4 @@
+import math
 import os
 import subprocess
 import cv2
@@ -124,7 +125,7 @@ def draw_top_headline(frame_bgr, headline_text):
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
-def crop_resize(frame, target_w, target_h, zoom=1.0):
+def crop_resize(frame, target_w, target_h, zoom=1.0, pan_x=0.0, pan_y=0.0):
     h, w = frame.shape[:2]
     target_ratio = target_w / float(target_h)
     src_ratio = w / float(h)
@@ -141,10 +142,48 @@ def crop_resize(frame, target_w, target_h, zoom=1.0):
     if zoom > 1.001:
         ch, cw = cropped.shape[:2]
         zw, zh = int(cw / zoom), int(ch / zoom)
-        zx0, zy0 = (cw - zw) // 2, (ch - zh) // 2
+        max_dx = max(0, cw - zw)
+        max_dy = max(0, ch - zh)
+        zx0 = max(0, min(max_dx, int((cw - zw) * (0.5 + 0.5 * pan_x))))
+        zy0 = max(0, min(max_dy, int((ch - zh) * (0.5 + 0.5 * pan_y))))
         cropped = cropped[zy0:zy0 + zh, zx0:zx0 + zw]
 
     return cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+
+
+def build_short_thumbnail(viral_video_path, headline_text, reaction_video_path, out_jpg):
+    """Gera capa 1080x1920 estilo streamer + cena de impacto do game para o Short."""
+    c1 = cv2.VideoCapture(viral_video_path)
+    n1 = max(1, int(c1.get(cv2.CAP_PROP_FRAME_COUNT)))
+    c1.set(cv2.CAP_PROP_POS_FRAMES, int(n1 * 0.45))
+    ok1, f_top = c1.read()
+    c1.release()
+    if not ok1:
+        f_top = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+    c2 = cv2.VideoCapture(reaction_video_path)
+    n2 = max(1, int(c2.get(cv2.CAP_PROP_FRAME_COUNT)))
+    c2.set(cv2.CAP_PROP_POS_FRAMES, int(n2 * 0.35))
+    ok2, f_bot = c2.read()
+    c2.release()
+    if not ok2:
+        f_bot = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+    canvas = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    canvas[0:1230, :] = crop_resize(f_top, 1080, 1230, zoom=1.10)
+    canvas[1230:1920, :] = crop_resize(f_bot, 1080, 690, zoom=1.12)
+    cv2.rectangle(canvas, (0, 1222), (1080, 1238), (0, 235, 255), -1)
+    canvas = draw_top_headline(canvas, headline_text)
+
+    img_pil = Image.fromarray(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(img_pil)
+    font = load_font(96)
+    txt = "GTA 6!"
+    tb = draw.textbbox((0, 0), txt, font=font)
+    tw = tb[2] - tb[0]
+    draw.text(((1080 - tw) // 2, 1070), txt, font=font, fill=(255, 235, 0), stroke_width=8, stroke_fill=(0, 0, 0))
+    img_pil.save(out_jpg, quality=94)
+    return out_jpg
 
 
 class VideoClipReader:
@@ -250,12 +289,12 @@ def compose_react_short(
 
         if t < t_hook_end:
             prog = t / max(0.1, hook_dur)
-            # Prévia dinâmica em câmera lenta (sem imagem parada no segundo 0) para segurar swipe
             teaser_t = min(max_viral_use - 0.1, max(0.0, inter_sec - 1.4) + t * 0.45)
             v_frame = viral_reader.get_frame_at(teaser_t, loop=False)
-            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.05 + 0.09 * prog)
+            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.06 + 0.10 * prog)
             av_frame = hook_reader.get_frame_at(t, loop=False)
-            bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.03)
+            # Câmera viva no streamer (zoom + leve movimento orgânico)
+            bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.06 + 0.05 * prog, pan_x=0.18 * math.sin(t * 2.2))
             caption_str, active_word_idx = get_active_chunk(hook_words, prog)
             is_speaking = True
 
@@ -263,15 +302,20 @@ def compose_react_short(
             v_t = t - t_hook_end
             prog_p1 = v_t / max(0.1, part1_dur)
             v_frame = viral_reader.get_frame_at(v_t, loop=False)
-            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.02 + 0.05 * prog_p1)
+            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.02 + 0.06 * prog_p1)
             av_frame = idle_reader.get_frame_at(v_t, loop=True, pingpong=True)
-            bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.0)
+            bot_img = crop_resize(
+                av_frame, 1080, bot_h,
+                zoom=1.04 + 0.04 * abs(math.sin(t * 1.1)),
+                pan_x=0.28 * math.sin(t * 0.9),
+                pan_y=0.15 * math.cos(t * 0.7),
+            )
 
         elif t < t_inter_end:
             inter_t = t - t_part1_end
             prog = inter_t / max(0.1, inter_dur)
             v_frame = viral_reader.get_frame_at(inter_sec, loop=False)
-            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.09 + 0.07 * prog)
+            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.10 + 0.08 * prog)
             gray = cv2.cvtColor(top_img, cv2.COLOR_BGR2GRAY)
             gray_bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
             top_img = cv2.addWeighted(top_img, 0.45, gray_bgr, 0.55, -15)
@@ -280,7 +324,7 @@ def compose_react_short(
                 top_img = cv2.addWeighted(top_img, 1.0 - flash_w, np.full_like(top_img, 255), flash_w, 0)
 
             av_frame = inter_reader.get_frame_at(inter_t, loop=False)
-            bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.05)
+            bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.09 + 0.05 * prog, pan_x=-0.16 * math.sin(inter_t * 2.4))
             caption_str, active_word_idx = get_active_chunk(inter_words, prog)
             is_speaking = True
 
@@ -289,19 +333,24 @@ def compose_react_short(
             prog_p2 = part2_t / max(0.1, part2_dur)
             v_t = inter_sec + part2_t
             v_frame = viral_reader.get_frame_at(v_t, loop=False)
-            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.04 + 0.06 * prog_p2)
+            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.04 + 0.07 * prog_p2)
 
             time_left = t_total - t
             if time_left <= outro_dur:
                 outro_t = outro_dur - time_left
                 prog = outro_t / max(0.1, outro_dur)
                 av_frame = outro_reader.get_frame_at(outro_t, loop=False)
-                bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.03)
+                bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.06 + 0.04 * prog, pan_x=0.14 * math.sin(outro_t * 2.0))
                 caption_str, active_word_idx = get_active_chunk(outro_words, prog)
                 is_speaking = True
             else:
                 av_frame = idle_reader_2.get_frame_at(part2_t, loop=True, pingpong=True)
-                bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.0)
+                bot_img = crop_resize(
+                    av_frame, 1080, bot_h,
+                    zoom=1.05 + 0.04 * abs(math.cos(t * 1.2)),
+                    pan_x=-0.26 * math.sin(t * 1.0),
+                    pan_y=0.14 * math.sin(t * 0.8),
+                )
 
         canvas[0:top_h, :] = top_img
         canvas[top_h:1920, :] = bot_img
