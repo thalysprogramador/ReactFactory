@@ -48,5 +48,4 @@ jobs:
         run: |
           git config user.name "ReactFactory Bot"
           git config user.email "bot@reactfactory.local"
-          git add ReactFactory/data/history*.json
-          git diff --staged --quiet || (git commit -m "chore: update GTA 6 long video history [skip ci]" && git pull --rebase origin main && git push)
+          python ReactFactory/merge_history.py
