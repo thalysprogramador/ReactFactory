@@ -7,6 +7,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
 from hunter import hunt_viral_video, save_history
+from gta6_hunter import hunt_gta6_short_source, save_gta6_history
 from brain import generate_react_script
 from sfx import ensure_sfx
 from voice_and_avatar import (
@@ -14,8 +15,8 @@ from voice_and_avatar import (
     pick_avatar_clips,
     generate_batch_lipsync_clips,
 )
-from composer import compose_react_short
-from uploader import upload_short_to_youtube
+from composer import compose_react_short, build_short_thumbnail
+from uploader import upload_short_to_youtube, set_video_thumbnail
 
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
@@ -24,21 +25,27 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 
 def run_pipeline(do_upload=False):
+    theme = os.environ.get("CHANNEL_THEME", "gta6").strip().lower()
     print("====================================================")
-    print("   INICIANDO ESTEIRA V4 (LATENTSYNC KAGGLE + CURIOSIDADE)")
+    print(f"   INICIANDO ESTEIRA PRO SHORTS ({theme.upper()} + LATENTSYNC)")
     print("====================================================")
 
     sfx_whoosh, sfx_freeze = ensure_sfx()
 
-    print("[1/5] Minerando vídeo viral recente de curiosidade/ciência...")
-    viral_info = hunt_viral_video(os.path.join(TEMP_DIR, "viral_raw.mp4"))
+    if theme == "gta6":
+        print("[1/5] Pesquisando referências virais + cenas oficiais de GTA 6...")
+        viral_info = hunt_gta6_short_source(os.path.join(TEMP_DIR, "viral_raw.mp4"))
+    else:
+        print("[1/5] Minerando vídeo viral recente...")
+        viral_info = hunt_viral_video(os.path.join(TEMP_DIR, "viral_raw.mp4"))
     viral_path = viral_info["path"]
 
-    print("[2/5] Analisando contexto e vídeo com Gemini Flash e criando roteiro de retenção...")
+    print("[2/5] Analisando contexto, referências e frames com Gemini Flash...")
     script_data = generate_react_script(
         viral_path,
         viral_info["title"],
         viral_info.get("description", ""),
+        research_brief=viral_info.get("research_brief"),
     )
     print("[ROTEIRO GERADO]:", json.dumps(script_data, indent=2, ensure_ascii=False))
 
@@ -90,17 +97,47 @@ def run_pipeline(do_upload=False):
         output_final_mp4=final_output,
     )
 
+    short_thumb = os.path.join(BASE_DIR, "output_short_thumb.jpg")
+    try:
+        build_short_thumbnail(
+            viral_video_path=viral_path,
+            headline_text=script_data.get("headline_top", "GTA 6!"),
+            reaction_video_path=clips["reaction_primary"],
+            out_jpg=short_thumb,
+        )
+    except Exception as terr:
+        print(f"[THUMB SHORT] Aviso: {terr}")
+        short_thumb = None
+
     yt_video_id = None
     if do_upload:
         print("[5/5] Fazendo upload automático para o YouTube Shorts...")
         yt_video_id = upload_short_to_youtube(
             video_path=final_output,
-            title=script_data.get("yt_title", "Olha o que aconteceu! #shorts"),
-            description=script_data.get("yt_description", "#shorts #react #viral"),
-            tags=script_data.get("yt_tags", ["shorts", "react", "viral"]),
+            title=script_data.get("yt_title", "Segredo absurdo do GTA 6! #gta6 #shorts"),
+            description=script_data.get("yt_description", "#gta6 #gtavi #rockstargames #shorts"),
+            tags=script_data.get("yt_tags", ["gta 6", "gta vi", "rockstar games", "shorts", "viral"]),
             privacy_status="public",
         )
+        if yt_video_id and short_thumb and os.path.exists(short_thumb):
+            try:
+                set_video_thumbnail(yt_video_id, short_thumb)
+            except Exception as err:
+                print(f"[UPLOADER] Aviso capa Short (YouTube pode limitar API thumb em Shorts): {err}")
 
+    if theme == "gta6":
+        save_gta6_history(
+            video_id=viral_info["id"],
+            angle=(viral_info.get("research_brief") or {}).get("chosen_angle"),
+            kind="short",
+            metadata={
+                "viral_id": viral_info["id"],
+                "original_title": viral_info["title"],
+                "yt_title": script_data.get("yt_title"),
+                "yt_uploaded_id": yt_video_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
     save_history(
         viral_info["id"],
         {
