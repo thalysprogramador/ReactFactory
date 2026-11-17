@@ -52,6 +52,12 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 import torch
+import perth
+if getattr(perth, "PerthImplicitWatermarker", None) is None:
+    class _DummyWM:
+        def apply_watermark(self, wav, sample_rate=None):
+            return wav
+    perth.PerthImplicitWatermarker = _DummyWM
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
 manifest_path = Path(sys.argv[1])
