@@ -51,5 +51,5 @@ jobs:
         run: |
           git config user.name "ReactFactory Bot"
           git config user.email "bot@reactfactory.local"
-          git add ReactFactory/data/history.json
+          git add ReactFactory/data/history*.json
           git diff --staged --quiet || (git commit -m "chore: update posted viral videos history [skip ci]" && git push)
