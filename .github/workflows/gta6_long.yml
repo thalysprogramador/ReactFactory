@@ -1,0 +1,52 @@
+name: GTA 6 Pro Long Video (1x/Dia)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  produce-and-upload-long:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install System Fonts & FFmpeg & Deno
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-liberation unzip
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+
+      - name: Install Python Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r ReactFactory/requirements.txt
+
+      - name: Run GTA 6 Storytelling Long Pipeline
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          YOUTUBE_TOKEN_BASE64: ${{ secrets.YOUTUBE_TOKEN_BASE64 }}
+          YOUTUBE_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
+        run: |
+          python -u ReactFactory/gta6_long_pipeline.py --upload
+
+      - name: Save GTA 6 Long History to Repository
+        run: |
+          git config user.name "ReactFactory Bot"
+          git config user.email "bot@reactfactory.local"
+          git add ReactFactory/data/history*.json
+          git diff --staged --quiet || (git commit -m "chore: update GTA 6 long video history [skip ci]" && git push)
