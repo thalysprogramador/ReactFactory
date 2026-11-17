@@ -76,40 +76,56 @@ def extract_audio_mp3_b64(video_path, max_sec=28):
     return None
 
 
-def generate_react_script(video_path, original_title="Viral Video", original_desc=""):
+def generate_react_script(video_path, original_title="Viral Video", original_desc="", research_brief=None):
     api_key = get_gemini_key()
     frames_b64, duration = extract_video_frames_b64(video_path, num_frames=8)
     audio_b64 = extract_audio_mp3_b64(video_path, max_sec=28)
 
     mid_default = round(min(max(duration * 0.45, 4.5), min(max(duration - 3.5, 5.5), 15.0)), 1)
     audio_note = (
-        "Você também está OUVINDO O ÁUDIO REAL do vídeo em anexo! Reaja especificamente ao que foi falado/aconteceu na cena (cite a fala, a piada ou o detalhe sonoro para parecer 100% autêntico)."
+        "Você também está OUVINDO O ÁUDIO REAL do vídeo em anexo! Reaja especificamente ao que foi falado/aconteceu na cena."
         if audio_b64
         else "Analise visualmente cada frame em detalhe para reagir exatamente ao que acontece."
     )
 
-    prompt = f"""Você é um estrategista e criador brasileiro TOP 1% de YouTube Shorts de REACT focado em BATER MILHÕES DE VIEWS (meta real: swipe rate > 82%, retenção média > 115% em loop e explosão de comentários) + CONTEÚDO TRANSFORMATIVO autêntico.
-Você está analisando 8 frames em ordem cronológica de um vídeo viral brasileiro de {duration:.1f} segundos.
+    ref_block = ""
+    if research_brief:
+        top_titles = "\n".join(
+            f"- ({r.get('views', 0):,} views) {r.get('channel', '')}: {r.get('title', '')}"
+            for r in (research_brief.get("top_references") or [])[:6]
+        )
+        ref_block = f"""
+TEMA OBRIGATÓRIO DO CANAL NESTA SEMANA (LANÇAMENTO NA QUINTA-FEIRA): **GTA 6 (Grand Theft Auto VI)**
+Ângulo específico deste vídeo: "{research_brief.get('chosen_angle', original_title)}"
+Referências virais de canais grandes bombando AGORA:
+{top_titles}
+Notícias/hipóteses atuais: {research_brief.get('grounding_notes', '')[:450]}
+Missão neste Short (meta: 30.000+ views): transformar essa cena/corte de GTA 6 em curiosidade viciante, top novidades, segredo escondido ou teoria polêmica para quem está contando as horas para quinta-feira!
+"""
+
+    prompt = f"""Você é um criador gamer brasileiro TOP 1% de YouTube Shorts focado em BATER 30K–1M+ DE VIEWS (meta: swipe rate > 84%, retenção média > 115% em loop e explosão de comentários) + CONTEÚDO TRANSFORMATIVO autêntico.
+Você está analisando 8 frames em ordem cronológica de um vídeo de {duration:.1f} segundos.
 {audio_note}
-Título original do vídeo: "{original_title}"
-Contexto/Descrição original: "{original_desc}"
+{ref_block}
+Título/Contexto base: "{original_title}"
+Detalhes adicionais: "{original_desc}"
 
 REGRAS DE OURO PARA RETENÇÃO ABSURDA (PROIBIDO CLICHÊS DE IA!):
-- NUNCA use frases robóticas ou genéricas: "Imagina a calma", "Ninguém esperava esse clima", "Acompanhe essa reação", "Prepare-se para ver", "Você não vai acreditar", "Veja até o fim".
-- Fale em português coloquial real do Brasil ("Mano", "Olha isso", "Peraí", "Como assim"), curto, direto e mantendo UM ÚNICO TOM firme e magnético do início ao fim.
-- REGRA DO GANCHO (0-2s): Nunca dê spoiler do clímax! Crie uma LACUNA DE CURIOSIDADE ou apontamento cirúrgico para um segundo/detalhe específico que obrigue quem está passando o dedo a ficar preso na tela.
-- REGRA DA INTERRUPÇÃO: Traga uma opinião forte, sarcasmo inteligente ou percepção que quem assistiu rápido não notou — nunca só descreva o óbvio!
+- NUNCA use frases robóticas: "Imagina a calma", "Ninguém esperava esse clima", "Acompanhe essa reação", "Prepare-se para ver", "Você não vai acreditar", "Veja até o fim".
+- Fale como gamer/streamer brasileiro espontâneo no microfone ("Mano", "Olha isso", "Cara", "Sério"), curto, direto, mantendo UM ÚNICO TOM firme e magnético do início ao fim.
+- REGRA DO GANCHO (0-2s): Crie uma LACUNA DE CURIOSIDADE ou apontamento cirúrgico para um detalhe do GTA 6 / cena nos primeiros 2 segundos sem entregar a surpresa!
+- REGRA DA INTERRUPÇÃO: Traga informação real, segredo, hipótese ou opinião forte sobre GTA 6 — nunca só narre o óbvio!
 
 Crie as 3 intervenções afiadas:
-1. `hook_text` (MÁXIMO 7 palavras — ~1.8s a 2.3s!): Gancho magnético nos 2 primeiros segundos prendendo atenção no detalhe/tensão (ex: "Olha a reação dela aos seis segundos!", "Mano, ninguém impediu esse cara a tempo?!", "Repara bem no que aparece atrás dele!").
-2. `interrupt_sec` (número decimal entre 4.5 e {min(max(duration - 3.5, 5.5), 15.5):.1f}): Segundo exato logo ANTES da grande virada/punchline para congelar a tela e aumentar o suspense.
-3. `interrupt_text` (MÁXIMO 9 palavras): Opinião afiada ou humor cirúrgico em cima da fala/ação que joga hype pro final (ex: "Nessa hora eu já tinha desligado o celular!", "Sério que ele achou que ia colar?!").
-4. `outro_text` (MÁXIMO 7 palavras): Fechamento rápido com PERGUNTA POLARIZADORA / DESAFIO DE NOTA que force comentários enquanto dá replay (ex: "Ele mandou bem ou passou vergonha?", "Nota zero a dez pra isso, comenta!").
+1. `hook_text` (MÁXIMO 7 palavras — ~1.8s a 2.3s!): Gancho magnético logo no segundo 0 (ex: "Ninguém reparou nesse segredo do GTA 6!", "Olha a física absurda dessa cena aqui!").
+2. `interrupt_sec` (número decimal entre 4.5 e {min(max(duration - 3.5, 5.5), 15.5):.1f}): Segundo exato antes da melhor cena/clímax para pausar e revelar o detalhe.
+3. `interrupt_text` (MÁXIMO 9 palavras): Revelação, curiosidade ou comparação cirúrgica que aumenta o hype para o desfecho.
+4. `outro_text` (MÁXIMO 7 palavras): Fechamento rápido com PERGUNTA POLARIZADORA para explodir comentários (ex: "Vai jogar na quinta ou vai esperar?", "Nota zero a dez pra esse detalhe!").
 5. `reaction_mood`: Escolha EXATAMENTE UM entre: "chocado", "rindo", "pensativo", "impressionado".
-6. `headline_top` (MÁXIMO 4 palavras em MAIÚSCULAS): Pergunta tensa ou choque SEM entregar o final (ex: "ELE FEZ ISSO MESMO?!", "OLHA A CARA DELE", "NINGUÉM VIU O FINAL").
-7. `yt_title`: Título magnético estilo Shorts BR com alta taxa de clique + 1 emoji + #shorts #viral #react.
-8. `yt_description`: Resumo curto em PT-BR + pergunta polarizadora pros comentários + hashtags (#shorts #brasil #viral #react #memes #humor #trends).
-9. `yt_tags`: Lista com 8 a 10 tags estratégicas em português para alcance no YouTube Shorts Brasil.
+6. `headline_top` (MÁXIMO 4 palavras em MAIÚSCULAS): Gancho de curiosidade sobre GTA 6 SEM entregar tudo (ex: "SEGREDO DO GTA 6!", "OLHA ESSA FÍSICA 🤯", "QUINTA-FEIRA VAI PARAR").
+7. `yt_title`: Título magnético SEO de alto CTR em PT-BR com palavra-chave GTA 6 + 1 emoji + #gta6 #shorts.
+8. `yt_description`: Resumo em PT-BR otimizado para busca de GTA 6 + pergunta pros comentários + hashtags (#gta6 #gtavi #rockstargames #games #shorts #viral #curiosidades).
+9. `yt_tags`: Lista com 12 a 15 tags estratégicas de alto volume para GTA 6 no YouTube Brasil ("gta 6", "gta vi", "gta 6 lancamento", "gta 6 novidades", "gta 6 segredos", "rockstar games", "gta 6 trailer", "gta 6 curiosidades", "gta 6 brasil", "vice city", "leonida", "shorts", etc.).
 
 Responda APENAS com um JSON válido:
 {{
@@ -118,10 +134,10 @@ Responda APENAS com um JSON válido:
   "interrupt_sec": {mid_default},
   "interrupt_text": "...",
   "outro_text": "...",
-  "reaction_mood": "rindo",
+  "reaction_mood": "impressionado",
   "yt_title": "...",
   "yt_description": "...",
-  "yt_tags": ["react", "shorts", "viral", "brasil", "humor", "memes", "curiosidades", "trends"]
+  "yt_tags": ["gta 6", "gta vi", "gta 6 novidades", "gta 6 segredos", "gta 6 lancamento", "rockstar games", "vice city", "leonida", "games", "shorts", "viral", "curiosidades"]
 }}"""
 
     parts = [{"text": prompt}]
