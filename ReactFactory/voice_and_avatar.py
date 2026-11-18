@@ -336,6 +336,8 @@ def generate_batch_lipsync_clips(hook_wav, inter_wav, outro_wav, talking_clips, 
     """
     Envia os 3 trechos (hook, interrupção, outro) em um único job para o Kaggle T4 GPU
     rodar ByteDance LatentSync v1.5 com sincronização labial de alta fidelidade.
+    Se a fila gratuita de GPU do Kaggle exceder o tempo limite (QUEUED), ativa fallback
+    local dinâmico com os clipes de fala do streamer para nunca perder um horário agendado.
     """
     jobs = [
         {
@@ -363,4 +365,29 @@ def generate_batch_lipsync_clips(hook_wav, inter_wav, outro_wav, talking_clips, 
             "inference_steps": 20,
         },
     ]
-    return run_batch_lipsync_kaggle(jobs, out_dir=out_dir)
+    try:
+        return run_batch_lipsync_kaggle(jobs, out_dir=out_dir, timeout_sec=900)
+    except Exception as err:
+        print(f"[AVATAR FALLBACK] Kaggle LatentSync indisponível/fila cheia ({err}). Usando sincronização local de segurança!", flush=True)
+        os.makedirs(out_dir, exist_ok=True)
+        outputs = {}
+        for job in jobs:
+            dur = max(1.5, get_audio_duration(job["audio_path"]))
+            dst_p = os.path.join(out_dir, job["output_name"])
+            subprocess.run(
+                [
+                    FFMPEG_EXE, "-y",
+                    "-stream_loop", "-1", "-i", str(job["video_path"]),
+                    "-i", str(job["audio_path"]),
+                    "-t", f"{dur:.2f}",
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "192k",
+                    dst_p,
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            outputs[job["name"]] = dst_p
+        return outputs
