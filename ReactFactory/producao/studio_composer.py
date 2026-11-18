@@ -196,14 +196,14 @@ def _draw_lower_third_and_hud(frame_bgr, top_hud_strip, headline, subheadline, c
 
     img_pil = Image.fromarray(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil, "RGBA")
-    f_tag = load_font(19)
-    f_head = load_font(36)
-    f_sub = load_font(21)
+    f_tag = load_font(17, style="poppins")
+    f_head = load_font(44, style="anton")
+    f_sub = load_font(19, style="poppins")
 
     bx0 = 48 + x_off
     by0 = 758
     bw = 740
-    bh = 128
+    bh = 132
 
     bg_a = int(224 * alpha_mul)
     bd_a = int(48 * alpha_mul)
@@ -213,28 +213,27 @@ def _draw_lower_third_and_hud(frame_bgr, top_hud_strip, headline, subheadline, c
 
     draw.rounded_rectangle(
         [bx0, by0, bx0 + bw, by0 + bh],
-        radius=10,
-        fill=(10, 12, 18, bg_a),
+        radius=12,
+        fill=(8, 11, 18, bg_a),
         outline=(255, 255, 255, bd_a),
         width=1,
     )
-    # Barra vertical de acento Warm Editorial Gold (4px)
-    draw.rounded_rectangle([bx0, by0 + 10, bx0 + 4, by0 + bh - 10], radius=2, fill=(245, 158, 11, ac_a))
+    draw.rounded_rectangle([bx0, by0 + 12, bx0 + 5, by0 + bh - 12], radius=2, fill=(255, 190, 11, ac_a))
 
     tag_str = f"DOSSIE GTA VI  •  {_clean_ascii(callout or 'LEONIDA').upper()}"
-    draw.text((bx0 + 22, by0 + 14), tag_str[:50], font=f_tag, fill=(245, 158, 11, ac_a))
-    draw.text((bx0 + 22, by0 + 42), _clean_ascii(headline).upper()[:40], font=f_head, fill=(248, 250, 252, tx_a))
-    draw.text((bx0 + 22, by0 + 90), _clean_ascii(subheadline)[:68], font=f_sub, fill=(148, 163, 184, sb_a))
+    draw.text((bx0 + 24, by0 + 12), tag_str[:50], font=f_tag, fill=(255, 190, 11, ac_a))
+    draw.text((bx0 + 24, by0 + 36), _clean_ascii(headline).upper()[:42], font=f_head, fill=(248, 250, 252, tx_a))
+    draw.text((bx0 + 24, by0 + 92), _clean_ascii(subheadline)[:68], font=f_sub, fill=(148, 163, 184, sb_a))
 
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
 def _draw_word_caption_pil(frame_bgr, words, t_sec):
     """
-    Legenda Broadcast V3 para Vídeo Longo (Zero Caixa de Fundo — Estilo Viral Clean):
-    - Exibe 2 a 3 palavras grandes por vez (fonte 64px ExtraBold) no terço inferior (y=935).
-    - Contorno preto espesso (stroke_width=8) + sombra projetada profunda (+5px Y).
-    - Palavra ativa em Amarelo Elétrico (#FFE600) e demais em Branco Puro (#FFFFFF).
+    Legenda Broadcast Cinema V4 para Vídeo Longo (Poppins-Black ExtraBold — Zero Caixa de Fundo):
+    - Exibe 2 a 3 palavras grandes por vez (fonte Poppins-Black 66px) no terço inferior (y=930).
+    - Contorno escuro limpo + sombra projetada profunda (+6px Y).
+    - Palavra ativa em Ouro Elétrico (#FFE01B) e demais em Branco Puro (#FFFFFF).
     """
     if not words:
         return frame_bgr
@@ -258,34 +257,34 @@ def _draw_word_caption_pil(frame_bgr, words, t_sec):
 
     img_pil = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil, "RGBA")
-    font = load_font(64)
+    font = load_font(66, style="poppins")
 
     tokens = [_clean_ascii(it["w"]).upper() for it in chunk]
     full_str = " ".join(tokens)
     bb = draw.textbbox((0, 0), full_str, font=font)
     tw = bb[2] - bb[0]
     x0 = (1920 - tw) // 2
-    y0 = 936
+    y0 = 928
 
     xc = x0
     for idx_in_chunk, tok in enumerate(tokens):
         is_curr = (chunk_start + idx_in_chunk) == active_idx
-        col = (255, 230, 0, 255) if is_curr else (255, 255, 255, 255)
+        col = (255, 224, 27, 255) if is_curr else (255, 255, 255, 255)
         draw.text(
-            (xc + 3, y0 + 5),
+            (xc + 3, y0 + 6),
             tok,
             font=font,
-            fill=(0, 0, 0, 235),
-            stroke_width=9,
-            stroke_fill=(0, 0, 0, 235),
+            fill=(0, 0, 0, 210),
+            stroke_width=10,
+            stroke_fill=(0, 0, 0, 210),
         )
         draw.text(
             (xc, y0),
             tok,
             font=font,
             fill=col,
-            stroke_width=8,
-            stroke_fill=(0, 0, 0, 255),
+            stroke_width=7,
+            stroke_fill=(8, 10, 16, 255),
         )
         wb_sp = draw.textbbox((0, 0), tok + " ", font=font)
         xc += wb_sp[2] - wb_sp[0]
@@ -457,87 +456,110 @@ def _render_block_video(job, fallback_clips, sfx_pack, work_dir):
 
 def build_editorial_thumbnail(jpg_path, headline, subheadline, out_jpg):
     """
-    Motor de Thumbnail Viral Gaming V3 (1280x720 — Alto CTR para Lançamento & Lives de GTA 6):
-    - Fundo 1080p vibrante de Vice City / Lucia & Jason com contraste de cinema e vinheta direcional.
-    - Janela Picture-in-Picture da Live (Davy Jones / Bistecone) no canto superior direito com badge '🔴 AO VIVO'.
-    - Tipografia de impacto gigante em 1-2 linhas (Branco Puro + Amarelo Elétrico #FFE600) com contorno preto 3D.
+    Motor de Thumbnail Cinema 3D V4 (Renderizado em Headless Chromium via Remotion `GtaThumbnail3D`):
+    - Tipografia 3D extrudada metálica (Ouro + Branco em fonte Anton Display com perspectiva inclinada).
+    - Monitor 3D flutuante em perspectiva com brilho de vidro mostrando a live real (Davy Jones / Bistecone).
+    - Cena hero 1080p de alto impacto com color grading RAGE 9 e iluminação volumétrica.
+    - Zero retângulos amadores ou fontes genéricas de PIL!
     """
+    import base64
+    import json
+    import random
+
+    def _to_b64_data_uri(img_or_path):
+        if isinstance(img_or_path, str) and os.path.exists(img_or_path):
+            raw = open(img_or_path, "rb").read()
+            return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
+        if isinstance(img_or_path, np.ndarray):
+            ok, buf = cv2.imencode(".jpg", img_or_path, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+            if ok:
+                return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
+        return ""
+
+    # 1. Seleciona cena hero de alto impacto visual (varia entre cenas cinematográficas reais de GTA 6)
+    hero_uri = ""
     if jpg_path and os.path.exists(jpg_path):
-        hero = Image.open(jpg_path).convert("RGB")
-    else:
-        hero = Image.new("RGB", (1280, 720), (12, 16, 26))
+        hero_uri = _to_b64_data_uri(jpg_path)
+    if not hero_uri:
+        vault_picks = [
+            os.path.join(BASE_DIR, "temp_gta6", "vault", fn)
+            for fn in ("img_17.jpg", "img_08.jpg", "img_26.jpg", "img_13.jpg", "img_07.jpg", "img_21.jpg")
+            if os.path.exists(os.path.join(BASE_DIR, "temp_gta6", "vault", fn))
+        ]
+        if vault_picks:
+            hero_uri = _to_b64_data_uri(random.choice(vault_picks))
 
-    sc = max(1280.0 / hero.width, 720.0 / hero.height)
-    hero = hero.resize((int(hero.width * sc), int(hero.height * sc)), Image.Resampling.LANCZOS)
-    x0, y0 = (hero.width - 1280) // 2, (hero.height - 720) // 2
-    canvas = hero.crop((x0, y0, x0 + 1280, y0 + 720))
-
-    # Color boost viral (saturação + contraste local + gradiente escuro apenas no terço inferior para o texto)
-    arr = np.array(canvas, dtype=np.float32)
-    mean = arr.mean(axis=2, keepdims=True)
-    arr = np.clip(mean + (arr - mean) * 1.34, 0, 255)
-    arr = np.clip((arr - 124) * 1.15 + 124, 0, 255)
-    grad = np.ones((720, 1, 1), dtype=np.float32)
-    grad[340:] = np.linspace(1.0, 0.12, 720 - 340, dtype=np.float32)[:, None, None]
-    arr = arr * grad
-    canvas = Image.fromarray(arr.astype(np.uint8))
-
-    # Injeta PiP real de streamer em live (Bistecone / Davy Jones) no canto superior direito
-    live_pip_candidates = [
+    # 2. Captura frame real da live de Davy Jones ou Bistecone para o monitor 3D flutuante
+    live_uri = ""
+    live_candidates = [
         os.path.join(BASE_DIR, "assets", "gta6_clips", "gta6_live_bistecone_01.mp4"),
         os.path.join(BASE_DIR, "assets", "gta6_clips", "gta6_live_davyjones_02.mp4"),
+        os.path.join(BASE_DIR, "assets", "gta6_clips", "gta6_live_bistecone_02.mp4"),
     ]
-    for lp in live_pip_candidates:
-        if os.path.exists(lp):
-            cap = cv2.VideoCapture(lp)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 35)
-            ok, lfr = cap.read()
-            cap.release()
-            if ok and lfr is not None:
-                pip_rgb = cv2.cvtColor(cv2.resize(lfr, (376, 212), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
-                pip_im = Image.fromarray(pip_rgb)
-                canvas.paste(pip_im, (868, 34))
-                break
+    existing_lives = [p for p in live_candidates if os.path.exists(p)]
+    if existing_lives:
+        cap = cv2.VideoCapture(random.choice(existing_lives))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 40)
+        ok, lfr = cap.read()
+        cap.release()
+        if ok and lfr is not None:
+            live_uri = _to_b64_data_uri(cv2.resize(lfr, (640, 360), interpolation=cv2.INTER_AREA))
 
-    draw = ImageDraw.Draw(canvas, "RGBA")
-    # Moldura do PiP da Live + Selo 🔴 AO VIVO
-    draw.rounded_rectangle([866, 32, 1246, 248], radius=10, outline=(255, 230, 0, 255), width=4)
-    f_live = load_font(24)
-    draw.rounded_rectangle([878, 42, 1042, 82], radius=8, fill=(220, 20, 20, 245))
-    draw.ellipse([890, 54, 904, 68], fill=(255, 255, 255, 255))
-    draw.text((912, 48), "AO VIVO", font=f_live, fill=(255, 255, 255, 255))
+    # 3. Divide a manchete em 2 linhas de impacto (Linha 1: Branco 3D | Linha 2: Ouro Metálico 3D)
+    clean_h = (_clean_ascii(headline) or "ELES TRAVARAM AO VIVO!").upper()
+    words = clean_h.split()
+    if len(words) <= 2:
+        line1 = "GTA 6 AO VIVO"
+        line2 = clean_h
+    else:
+        mid = max(1, len(words) // 2)
+        line1 = " ".join(words[:mid])
+        line2 = " ".join(words[mid:])
 
-    # Badge superior esquerdo de autoridade com largura calculada dinamicamente
-    f_badge = load_font(32)
-    badge_txt = "LANCAMENTO GTA 6 // LIVES"
-    btb = draw.textbbox((0, 0), badge_txt, font=f_badge)
-    bbw = (btb[2] - btb[0]) + 86
-    draw.rounded_rectangle([36, 34, 36 + bbw, 96], radius=12, fill=(10, 12, 18, 235), outline=(255, 230, 0, 255), width=3)
-    draw.ellipse([54, 55, 74, 75], fill=(255, 45, 45, 255))
-    draw.text((88, 47), badge_txt, font=f_badge, fill=(255, 255, 255, 255))
+    clean_sub = (_clean_ascii(subheadline) or "DAVY JONES & BISTECONE EM VICE CITY").upper()[:46]
 
-    # Título gigante de impacto (até 4 palavras curtas)
-    f_big = load_font(112)
-    clean_h = (_clean_ascii(headline) or "JOGO LIBERADO!").upper()
-    tb = draw.textbbox((0, 0), clean_h, font=f_big)
-    tw = tb[2] - tb[0]
-    while tw > 1190 and f_big.size > 68:
-        f_big = load_font(f_big.size - 6)
-        tb = draw.textbbox((0, 0), clean_h, font=f_big)
-        tw = tb[2] - tb[0]
-    tx = 44
-    draw.text((tx + 6, 468 + 8), clean_h, font=f_big, fill=(0, 0, 0, 245), stroke_width=12, stroke_fill=(0, 0, 0, 245))
-    draw.text((tx, 468), clean_h, font=f_big, fill=(255, 230, 0, 255), stroke_width=10, stroke_fill=(0, 0, 0, 255))
+    props = {
+        "heroImageUrl": hero_uri,
+        "livePipUrl": live_uri,
+        "topKicker": "GTA VI • LANÇAMENTO & LIVES",
+        "line1": line1,
+        "line2": line2,
+        "subline": clean_sub,
+        "liveLabel": "AO VIVO • PS5 PRO",
+        "accentColor": "#FFBE0B",
+    }
 
-    # Subtítulo de curiosidade extrema na base
-    f_sub = load_font(44)
-    clean_s = (_clean_ascii(subheadline) or "DAVY JONES E BISTECONE EM CHOQUE EM VICE CITY").upper()[:46]
-    sb = draw.textbbox((0, 0), clean_s, font=f_sub)
-    sw = sb[2] - sb[0]
-    draw.rounded_rectangle([42, 608, 42 + sw + 36, 678], radius=10, fill=(220, 25, 25, 245), outline=(255, 255, 255, 220), width=2)
-    draw.text((60, 618), clean_s, font=f_sub, fill=(255, 255, 255, 255), stroke_width=4, stroke_fill=(0, 0, 0, 255))
+    try:
+        bundle_dir = AgenteEditorAudiovisual.ensure_remotion_bundle()
+        props_file = out_jpg + ".thumb3d.json"
+        with open(props_file, "w", encoding="utf-8") as f:
+            json.dump(props, f, ensure_ascii=False)
+        out_png = out_jpg + ".png"
+        npx_bin = "npx.cmd" if os.name == "nt" else "npx"
+        cmd = [
+            npx_bin, "remotion", "still", bundle_dir, "GtaThumbnail3D", out_png,
+            "--frame=0", f"--props={props_file}",
+        ]
+        r = subprocess.run(cmd, cwd=AgenteEditorAudiovisual.STUDIO_DIR, capture_output=True, text=True, timeout=60)
+        try:
+            os.remove(props_file)
+        except OSError:
+            pass
+        if r.returncode == 0 and os.path.exists(out_png):
+            Image.open(out_png).convert("RGB").save(out_jpg, quality=95)
+            try:
+                os.remove(out_png)
+            except OSError:
+                pass
+            print(f"[THUMB 3D V4] Renderizada via Remotion Chromium: {out_jpg}", flush=True)
+            return out_jpg
+        print(f"[THUMB 3D V4] Aviso Remotion ({r.returncode}): {r.stderr[-220:]}", flush=True)
+    except Exception as e_th:
+        print(f"[THUMB 3D V4] Fallback ({e_th})", flush=True)
 
-    canvas.save(out_jpg, quality=95)
+    # Fallback de emergência caso Chromium falhe
+    if jpg_path and os.path.exists(jpg_path):
+        Image.open(jpg_path).convert("RGB").resize((1280, 720), Image.Resampling.LANCZOS).save(out_jpg, quality=94)
     return out_jpg
 
 
@@ -683,17 +705,20 @@ def compose_studio_video(script_data, wav_map, words_map, work_dir, output_mp4, 
         stderr=subprocess.DEVNULL,
     )
 
+    import random
+
     thumb_candidates = [
         os.path.join(BASE_DIR, "temp_gta6", "vault", fn)
-        for fn in ("img_09.jpg", "img_07.jpg", "img_21.jpg", "img_08.jpg", "img_26.jpg")
+        for fn in ("img_17.jpg", "img_08.jpg", "img_26.jpg", "img_13.jpg", "img_07.jpg", "img_21.jpg")
+        if os.path.exists(os.path.join(BASE_DIR, "temp_gta6", "vault", fn))
     ]
-    hero_jpg = next((p for p in thumb_candidates if os.path.exists(p)), None) or (
+    hero_jpg = random.choice(thumb_candidates) if thumb_candidates else (
         block_jobs[0]["blk"].get("primary_img") if block_jobs else None
     )
     build_editorial_thumbnail(
         hero_jpg,
-        script_data.get("thumb_text", "19 DE NOVEMBRO"),
-        script_data.get("thumb_subtext", "DOSSIE OFICIAL GTA 6"),
+        script_data.get("thumb_text", "ELES TRAVARAM AO VIVO!"),
+        script_data.get("thumb_subtext", "DAVY JONES & BISTECONE EM VICE CITY"),
         output_thumb_jpg,
     )
     real_dur = get_media_duration(output_mp4)
