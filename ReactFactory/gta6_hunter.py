@@ -45,6 +45,8 @@ GTA6_TIKTOK_CREATORS = [
 ]
 
 GTA6_SHORT_ANGLES = [
+    "O GTA 6 já liberou na Nova Zelândia: primeiras cenas reais e reações dos influenciadores",
+    "Primeiras horas jogando GTA 6 em Vice City: os detalhes que deixaram os streamers em choque",
     "5 segredos absurdos confirmados para o GTA 6 que ninguém percebeu no trailer",
     "Como o sistema de polícia e NPCs com IA do GTA 6 vai destruir o GTA 5",
     "Por que o lançamento do GTA 6 na quinta-feira vai parar a internet mundial",
@@ -56,6 +58,7 @@ GTA6_SHORT_ANGLES = [
 ]
 
 GTA6_LONG_ANGLES = [
+    "GTA 6 LIBERADO NA NOVA ZELÂNDIA: AS PRIMEIRAS HORAS REAIS, GAMEPLAY E REAÇÕES EM VICE CITY",
     "COMO VAI SER O DIA DO LANÇAMENTO DO GTA 6 (A QUINTA-FEIRA QUE VAI PARAR O MUNDO)",
     "TUDO QUE A ROCKSTAR ESCONDEU NO GTA 6: SEGREDOS, MAPA E TEORIAS QUE VOCÊ PERDEU",
     "POR QUE O GTA 6 VAI MUDAR OS GAMES PARA SEMPRE (E NADA SERÁ IGUAL DEPOIS DE QUINTA)",
@@ -336,16 +339,29 @@ def _try_tiktok_gta6_clip(output_path, used_ids):
     return None
 
 
-def _build_rockstar_montage_clip(mp4_vault, jpg_vault, output_path, bgm_path=None):
-    """Monta um clipe dinâmico multi-cenas (~22s) com trailers/cenas oficiais do GTA 6 + BGM Synthwave."""
-    picks = list(mp4_vault)
-    random.shuffle(picks)
-    chosen = picks[:5]
+def _build_rockstar_montage_clip(mp4_vault, jpg_vault, output_path, bgm_path=None, angle_text="", research_data=None):
+    """Monta um clipe dinâmico multi-cenas (~22s) com vídeos reais semânticos do GTA 6 + BGM dinâmica."""
+    from producao.catalog import select_semantic_assets  # noqa: WPS433
+    from producao.sound_designer import fetch_dynamic_bgm_for_mood  # noqa: WPS433
+
+    sem = select_semantic_assets(
+        [{"narration": angle_text, "headline": angle_text, "callout": "GTA 6"}, {"narration": "gameplay carros vice city lucia jason", "headline": "LEONIDA"}],
+        prefer_horizontal=False,
+        research_data=research_data,
+        ffmpeg_exe=FFMPEG_EXE,
+    )
+    sem_vids = []
+    for item in sem:
+        for v in item.get("video_clips", []):
+            if v not in sem_vids and os.path.exists(v):
+                sem_vids.append(v)
+
+    picks = sem_vids + [p for p in mp4_vault if p not in sem_vids]
+    chosen = picks[:6] if picks else list(mp4_vault)[:5]
     segs = []
     for i, src in enumerate(chosen):
         seg_p = os.path.join(GTA6_TEMP_DIR, f"short_cut_{i}.mp4")
-        d = min(4.8, max(3.2, get_media_duration(src)))
-        zoom_dir = "1.04+0.0018*on" if i % 2 == 0 else "1.12-0.0018*on"
+        d = min(4.2, max(3.0, get_media_duration(src)))
         subprocess.run([
             FFMPEG_EXE, "-y", "-t", f"{d:.2f}", "-i", src,
             "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1",
@@ -400,6 +416,11 @@ def _build_rockstar_montage_clip(mp4_vault, jpg_vault, output_path, bgm_path=Non
     ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     dur = get_media_duration(silent_mp4)
+    if not bgm_path:
+        try:
+            bgm_path, _ = fetch_dynamic_bgm_for_mood("urban", FFMPEG_EXE)
+        except Exception:
+            bgm_path = None
     bgm = bgm_path if (bgm_path and os.path.exists(bgm_path)) else os.path.join(BASE_DIR, "assets", "bgm_gta_synth.mp3")
     if os.path.exists(bgm):
         subprocess.run([
@@ -438,7 +459,9 @@ def hunt_gta6_short_source(output_path=None):
             tt["vault_jpgs"] = jpg_vault
             return tt
 
-    dur = _build_rockstar_montage_clip(mp4_vault, jpg_vault, output_path)
+    dur = _build_rockstar_montage_clip(
+        mp4_vault, jpg_vault, output_path, angle_text=research["chosen_angle"], research_data=research
+    )
     uid = f"gta6_official_{int(datetime.now(timezone.utc).timestamp())}"
     return {
         "id": uid,
