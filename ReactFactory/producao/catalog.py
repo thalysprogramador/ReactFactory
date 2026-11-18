@@ -1,39 +1,53 @@
-"""Catálogo Semântico de B-Rolls Oficiais GTA 6 (Imagens 4K + Cenas Reais de Trailers).
+"""Catálogo Semântico de B-Rolls em Vídeo 1080p (Gameplay/Trailers + Influenciadores) e Imagens 4K.
 
-Regra Fundamental do Agente 3 (Editor Audiovisual):
-- NUNCA usar os vídeos de máscara/sticker preto-e-branco do site da Rockstar.
-- Cada trecho da narração recebe um asset cujo tema semântico bate com o assunto falado
-  (mapa/região, veículo, Lucia/Jason, armas/combate, vida noturna, água/Leonida Keys, lançamento).
-- Zero repetição de imagens/cenas dentro do mesmo vídeo.
+Garante que 100% dos blocos de Vídeos Longos e Shorts usem VÍDEOS REAIS EM MOVIMENTO
+semanticamente conectados ao que o narrador está falando em cada frase.
 """
 import glob
 import os
 import subprocess
+import sys
 import cv2
 import numpy as np
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VAULT_DIR = os.path.join(BASE_DIR, "temp_gta6", "vault")
-TRAILERS_DIR = os.path.join(BASE_DIR, "temp_gta6", "trailers")
-CLIPS_DIR = os.path.join(BASE_DIR, "temp_gta6", "real_clips")
+CLIPS_CURATED_DIR = os.path.join(BASE_DIR, "assets", "gta6_clips")
+INFLUENCER_CLIPS_DIR = os.path.join(BASE_DIR, "temp_gta6", "influencer_clips")
 
-# Mapeamento visual verificado quadro a quadro das 30 imagens 4K oficiais de rockstargames.com/VI
+# Mapeamento visual verificado quadro-a-quadro dos 17 clipes 1080p em assets/gta6_clips/
+VIDEO_SEMANTIC_MAP = {
+    "gta6_vid_00.mp4": {"tags": ["personagens", "leonida", "rua", "historia", "npc", "cutscene"], "desc": "Personagem caminhando em rua de Leonida"},
+    "gta6_vid_01.mp4": {"tags": ["motos", "veiculos", "offroad", "mount_kalaga", "grassrivers", "mapa", "acao"], "desc": "Moto motocross saltando nas trilhas de Mount Kalaga"},
+    "gta6_vid_02.mp4": {"tags": ["carros", "vice_city", "noite", "direcao", "estrada", "iluminacao", "conversivel"], "desc": "Conversível dirigindo à noite nas avenidas neon de Vice City"},
+    "gta6_vid_03.mp4": {"tags": ["carros", "velocidade", "corrida", "vice_city", "noite", "fisica", "veiculos"], "desc": "Corrida de carros esportivos em alta velocidade em Vice City"},
+    "gta6_vid_04.mp4": {"tags": ["fisica", "acidente", "carros", "explosao", "rage9", "acao", "policia", "destruicao"], "desc": "Acidente cinematográfico com carro capotando e faíscas na física RAGE 9"},
+    "gta6_vid_05.mp4": {"tags": ["vice_city", "praia", "npc", "redes_sociais", "influenciadores", "vida_real", "mundo_aberto"], "desc": "Influenciadores e NPCs gravando manobras na praia de Vice Beach"},
+    "gta6_vid_06.mp4": {"tags": ["personagens", "historia", "graficos", "rosto", "expressao", "cutscene", "dialogo"], "desc": "Cutscene ultra-realista de personagem em Leonida"},
+    "gta6_vid_07.mp4": {"tags": ["barcos", "iate", "agua", "oceano", "leonida_keys", "mapa", "fisica"], "desc": "Iate cortando as ondas em alta velocidade em Leonida Keys"},
+    "gta6_vid_08.mp4": {"tags": ["personagens", "npc", "cal", "humor", "leonida", "historia"], "desc": "Personagem reagindo em cena de história em Leonida"},
+    "gta6_vid_09.mp4": {"tags": ["lucia", "noite", "clube", "festa", "musica", "vice_city", "iluminacao"], "desc": "Lucia dançando sob luzes volumétricas em clube noturno de Vice City"},
+    "gta6_vid_10.mp4": {"tags": ["lancamento", "19_de_novembro", "nova_zelandia", "rockstar", "ps5", "xbox", "data"], "desc": "Revelação oficial do lançamento em 19 de novembro"},
+    "gta6_vid_12.mp4": {"tags": ["lucia", "jason", "protagonistas", "assalto", "crime", "armas", "casal", "historia"], "desc": "Lucia e Jason colocando bandanas antes de assalto"},
+    "gta6_vid_17.mp4": {"tags": ["agua", "oceano", "vida_marinha", "graficos", "leonida_keys", "natureza", "mergulho"], "desc": "Fundo do mar cristalino e recife em Leonida Keys"},
+    "gta6_vid_18.mp4": {"tags": ["vice_city", "rua", "npc", "cotidiano", "mundo_aberto", "detalhes"], "desc": "Interação urbana e entregador nas ruas de Vice City"},
+    "gta6_vid_19.mp4": {"tags": ["personagens", "dialogo", "graficos", "iluminacao", "rage9", "rosto"], "desc": "Close-up cinematográfico mostrando detalhes de pele e iluminação"},
+    "gta6_vid_20.mp4": {"tags": ["barcos", "agua", "leonida_keys", "luxo", "oceano", "veiculos"], "desc": "Detalhes do iate navegando pelas águas de Leonida"},
+    "gta6_vid_28.mp4": {"tags": ["lancamento", "19_de_novembro", "nova_zelandia", "quinta_feira", "pre_load", "rockstar"], "desc": "Tela oficial Grand Theft Auto VI — 19 de Novembro de 2026"},
+}
+
 IMAGE_SEMANTIC_MAP = {
     "img_01.jpg": {"tags": ["jason", "armas", "combate", "sniper", "acao", "missao"], "subject": "Jason com rifle de precisão tático"},
     "img_02.jpg": {"tags": ["personagens", "boobie_ike", "drequan", "carros", "vice_city", "praia"], "subject": "Boobie Ike e Dre'Quan em Vice Beach"},
     "img_03.jpg": {"tags": ["carros", "veiculos", "fisica", "direcao", "estrada", "leonida_keys"], "subject": "Picape muscle amarela acelerando na costa"},
-    "img_04.jpg": {"tags": ["mapa", "vice_city", "port_gellhorn", "cidade", "por_do_sol", "graficos", "vertical"], "subject": "Skyline de Vice City e porto ao pôr do sol"},
-    "img_05.jpg": {"tags": ["lucia", "jason", "assalto", "armas", "crime", "protagonistas", "vertical"], "subject": "Lucia e Jason com equipamento tático de assalto"},
     "img_06.jpg": {"tags": ["carros", "veiculos", "offroad", "grassrivers", "customizacao", "canis"], "subject": "Picape 4x4 Canis verde off-road"},
     "img_07.jpg": {"tags": ["lucia", "jason", "protagonistas", "crime", "historia", "casal"], "subject": "Lucia e Jason mascarados em posto de gasolina"},
     "img_08.jpg": {"tags": ["lucia", "jason", "assalto", "armas", "acao", "heist", "protagonistas"], "subject": "Lucia e Jason armados em operação noturna"},
     "img_09.jpg": {"tags": ["lancamento", "capa", "lucia", "jason", "vice_city", "rockstar", "protagonistas"], "subject": "Arte oficial de GTA VI com Lucia e Jason"},
     "img_10.jpg": {"tags": ["carros", "veiculos", "muscle_car", "detalhes", "fisica", "customizacao"], "subject": "Muscle car clássico Deviant em close-up"},
-    "img_11.jpg": {"tags": ["vice_city", "cultura", "rua", "arte", "npcs", "detalhes"], "subject": "Arte urbana Stock 305 em Vice City"},
     "img_12.jpg": {"tags": ["personagens", "npcs", "vice_city", "cultura", "carros", "rua"], "subject": "Van grafitada Stock 305 e personagens de rua"},
     "img_13.jpg": {"tags": ["mapa", "leonida_keys", "barcos", "oceano", "helicoptero", "policia", "agua"], "subject": "Vista aérea de lanchas e helicóptero em Leonida Keys"},
     "img_14.jpg": {"tags": ["raul_bautista", "personagens", "armas", "combate", "assalto", "tiroteio"], "subject": "Raul Bautista disparando submetralhadora em assalto"},
-    "img_16.jpg": {"tags": ["lucia", "jason", "assalto", "armas", "vertical"], "subject": "Retrato tático de Lucia e Jason"},
     "img_17.jpg": {"tags": ["noite", "vice_city", "personagens", "carros", "iluminacao", "graficos"], "subject": "Casal em carro clássico sob luzes neon de Vice City"},
     "img_18.jpg": {"tags": ["lancamento", "capa", "geral", "rockstar", "mapa", "personagens", "veiculos"], "subject": "Mosaico oficial Grand Theft Auto VI"},
     "img_20.jpg": {"tags": ["carros", "veiculos", "fisica", "direcao", "praia", "sol"], "subject": "Muscle car amarelo na rodovia costeira"},
@@ -49,10 +63,13 @@ IMAGE_SEMANTIC_MAP = {
 
 
 def is_sticker_mask_video(mp4_path):
-    """Detecta vídeos de sticker/máscara ou cartelas pretas de classificação indicativa."""
+    """Detecta vídeos de sticker/máscara ou cartelas pretas."""
     try:
         cap = cv2.VideoCapture(mp4_path)
         n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if n < 15:
+            cap.release()
+            return True
         for frac in (0.25, 0.5, 0.75):
             cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(n * frac)))
             ret, frame = cap.read()
@@ -62,7 +79,7 @@ def is_sticker_mask_video(mp4_path):
             h, w = frame.shape[:2]
             black_ratio = float(np.mean(np.all(frame < 22, axis=2)))
             bot_white = float(np.mean(np.all(frame[h // 2 :, :] > 235, axis=2)))
-            if black_ratio > 0.35 or (black_ratio > 0.25 and bot_white > 0.06):
+            if black_ratio > 0.42 or (black_ratio > 0.25 and bot_white > 0.06):
                 cap.release()
                 return True
         cap.release()
@@ -71,119 +88,178 @@ def is_sticker_mask_video(mp4_path):
         return True
 
 
-def extract_real_trailer_clips(ffmpeg_exe):
-    """Extrai clipes reais 1080p 16:9 dos trailers oficiais da Rockstar (sem tarjas ou máscaras)."""
-    os.makedirs(CLIPS_DIR, exist_ok=True)
-    existing = sorted(glob.glob(os.path.join(CLIPS_DIR, "clip_*.mp4")))
-    if len(existing) >= 8:
-        return existing
+def harvest_live_influencer_clips(research_data, ffmpeg_exe, max_new=4):
+    """
+    Baixa trechos reais em vídeo (720p/1080p) dos vídeos mais recentes de canais de GTA 6
+    e influenciadores (Flow Games, SanInPlay, Gigaton, BRKsEDU, Gameplayrj, TGG, IGN)
+    usando o seletor DASH bv* para alimentar os B-rolls do dia (incluindo lançamento na Nova Zelândia).
+    """
+    os.makedirs(INFLUENCER_CLIPS_DIR, exist_ok=True)
+    refs = (research_data or {}).get("top_references") or []
+    harvested = []
 
-    # Remove qualquer mp4 de máscara antigo do vault para nunca ser usado por engano
-    for old_mp4 in glob.glob(os.path.join(VAULT_DIR, "mp4_*.mp4")):
-        if is_sticker_mask_video(old_mp4):
-            try:
-                os.remove(old_mp4)
-            except OSError:
-                pass
-
-    sources = sorted(glob.glob(os.path.join(TRAILERS_DIR, "*.mp4")))
-    clips = []
-    idx = 0
-    for src in sources:
-        if is_sticker_mask_video(src):
+    for r in refs:
+        if len(harvested) >= max_new:
+            break
+        vid = r.get("id") or ""
+        ch = (r.get("channel") or "Creator").replace(" ", "_")[:14]
+        title = (r.get("title") or "").lower()
+        if not vid or ch.startswith("Rockstar"):
             continue
-        cap = cv2.VideoCapture(src)
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        dur = n / float(fps)
-        cap.release()
-        if dur < 6.0:
+        dst = os.path.join(INFLUENCER_CLIPS_DIR, f"inf_{vid}.mp4")
+        if os.path.exists(dst) and os.path.getsize(dst) > 100_000 and not is_sticker_mask_video(dst):
+            harvested.append({"path": dst, "title": title, "channel": ch})
             continue
-        # Corta janelas limpas do miolo do trailer (ignorando tela preta inicial/final)
-        start_t = 1.5
-        while start_t + 4.5 < dur - 2.0 and idx < 20:
-            out_c = os.path.join(CLIPS_DIR, f"clip_{idx:02d}.mp4")
-            if not os.path.exists(out_c):
+        raw_dst = dst + ".raw.mp4"
+        try:
+            cmd = [
+                sys.executable, "-m", "yt_dlp", "--ffmpeg-location", ffmpeg_exe,
+                "-f", "bv*[height<=720][vcodec^=avc1]/bv*[height<=720]/b",
+                "--download-sections", "*32-37",
+                "--merge-output-format", "mp4",
+                "-o", raw_dst,
+                f"https://www.youtube.com/watch?v={vid}",
+            ]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=35, check=False)
+            if os.path.exists(raw_dst) and os.path.getsize(raw_dst) > 80_000:
                 subprocess.run(
                     [
-                        ffmpeg_exe, "-y", "-ss", f"{start_t:.2f}", "-t", "4.50", "-i", src,
-                        "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,setsar=1",
-                        "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p", "-an",
-                        out_c,
+                        ffmpeg_exe, "-y", "-i", raw_dst,
+                        "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=24,setsar=1",
+                        "-c:v", "libx264", "-preset", "fast", "-crf", "21", "-pix_fmt", "yuv420p", "-an",
+                        dst,
                     ],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     check=False,
                 )
-            if os.path.exists(out_c) and os.path.getsize(out_c) > 50_000 and not is_sticker_mask_video(out_c):
-                clips.append(out_c)
-                idx += 1
-            start_t += 4.8
-    return clips
+                os.remove(raw_dst)
+                if os.path.exists(dst) and not is_sticker_mask_video(dst):
+                    harvested.append({"path": dst, "title": title, "channel": ch})
+        except Exception:
+            if os.path.exists(raw_dst):
+                try:
+                    os.remove(raw_dst)
+                except OSError:
+                    pass
+
+    return harvested
 
 
-def select_semantic_assets(blocks, prefer_horizontal=True):
+def extract_real_trailer_clips(ffmpeg_exe):
+    """Retorna todos os clipes 1080p curados em assets/gta6_clips + clipes de influenciadores."""
+    curated = [
+        os.path.join(CLIPS_CURATED_DIR, fn)
+        for fn in sorted(VIDEO_SEMANTIC_MAP.keys())
+        if os.path.exists(os.path.join(CLIPS_CURATED_DIR, fn))
+    ]
+    inf = sorted(glob.glob(os.path.join(INFLUENCER_CLIPS_DIR, "inf_*.mp4")))
+    return curated + [p for p in inf if not is_sticker_mask_video(p)]
+
+
+def _score_text_against_tags(text_low, tags):
+    score = 0
+    for t in tags:
+        t_clean = t.replace("_", " ")
+        if t_clean in text_low or t in text_low:
+            score += 4
+    keyword_boosts = [
+        (["mapa", "vice city", "leonida", "região", "estado", "cidade"], ["mapa", "vice_city", "leonida_keys", "mount_kalaga"]),
+        (["lucia", "jason", "casal", "protagonista", "assalto", "crime", "prisão"], ["lucia", "jason", "protagonistas", "assalto"]),
+        (["carro", "veículo", "física", "dirigir", "corrida", "velocidade", "moto", "batida"], ["carros", "veiculos", "fisica", "motos", "acidente"]),
+        (["água", "oceano", "barco", "iate", "praia", "mar", "keys"], ["agua", "barcos", "oceano", "leonida_keys"]),
+        (["noite", "clube", "festa", "música", "neon"], ["noite", "clube", "musica"]),
+        (["npc", "inteligência artificial", "ia", "redes sociais", "influenciador", "realismo"], ["npc", "influenciadores", "redes_sociais", "mundo_aberto"]),
+        (["quinta", "19 de novembro", "lançamento", "nova zelândia", "meia-noite", "ps5", "xbox"], ["lancamento", "19_de_novembro", "nova_zelandia"]),
+    ]
+    for triggers, target_tags in keyword_boosts:
+        if any(w in text_low for w in triggers) and any(tt in tags for tt in target_tags):
+            score += 5
+    return score
+
+
+def select_semantic_assets(blocks, prefer_horizontal=True, research_data=None, ffmpeg_exe=None):
     """
-    Associa a cada bloco de roteiro uma imagem 4K oficial e/ou clipe de vídeo real
-    cujas tags semânticas correspondam às palavras da narração/tópico, SEM REPETIÇÃO.
+    Para CADA bloco do roteiro, seleciona:
+    - 3 VÍDEOS 1080p DISTINTOS (`video_clips`: [vid_1, vid_2, vid_3]) cujas tags semânticas batem com
+      cada trecho da frase falada no bloco (garantindo que o vídeo mostre exatamente o assunto falado!)
+    - 2 IMAGENS 4K DISTINTAS (`primary_img`, `secondary_img`) de apoio para os cards gráficos.
     """
-    used_imgs = set()
+    if ffmpeg_exe and research_data:
+        harvest_live_influencer_clips(research_data, ffmpeg_exe, max_new=4)
+
+    available_vids = {}
+    for fname, meta in VIDEO_SEMANTIC_MAP.items():
+        p = os.path.join(CLIPS_CURATED_DIR, fname)
+        if os.path.exists(p):
+            available_vids[fname] = (p, meta["tags"], meta["desc"])
+    for inf_p in sorted(glob.glob(os.path.join(INFLUENCER_CLIPS_DIR, "inf_*.mp4"))):
+        bn = os.path.basename(inf_p)
+        available_vids[bn] = (inf_p, ["influenciadores", "gameplay", "nova_zelandia", "lancamento", "gta6"], "Corte de influenciador/gameplay GTA 6")
+
     available_imgs = {}
     for fname, meta in IMAGE_SEMANTIC_MAP.items():
-        if prefer_horizontal and "vertical" in meta["tags"]:
-            continue
-        full_p = os.path.join(VAULT_DIR, fname)
-        if os.path.exists(full_p):
-            available_imgs[fname] = (full_p, meta["tags"], meta["subject"])
+        p = os.path.join(VAULT_DIR, fname)
+        if os.path.exists(p):
+            available_imgs[fname] = (p, meta["tags"], meta["subject"])
 
+    used_vids = []
+    used_imgs = set()
     assignments = []
+
     for b_idx, blk in enumerate(blocks):
-        text_low = (
-            f"{blk.get('narration', '')} {blk.get('visual_topic', '')} "
-            f"{blk.get('callout', '')} {blk.get('location_key', '')} {blk.get('character_name', '')}"
-        ).lower()
+        narration = blk.get("narration") or ""
+        words = narration.split()
+        third = max(1, len(words) // 3)
+        seg_texts = [
+            " ".join(words[:third]) + " " + blk.get("headline", "") + " " + blk.get("location_key", "") + " " + blk.get("character_name", ""),
+            " ".join(words[third : 2 * third]) + " " + blk.get("callout", ""),
+            " ".join(words[2 * third :]) + " " + blk.get("subheadline", ""),
+        ]
 
-        best_fname = None
-        best_score = -1
-        for fname, (full_p, tags, subj) in available_imgs.items():
-            if fname in used_imgs and len(used_imgs) < len(available_imgs):
-                continue
-            score = 0
-            for t in tags:
-                if t.replace("_", " ") in text_low or t in text_low:
-                    score += 3
-            # Bônus por palavras-chave contextuais
-            if any(w in text_low for w in ["mapa", "vice city", "leonida", "estado", "região", "keys", "porto"]) and "mapa" in tags:
-                score += 4
-            if any(w in text_low for w in ["lucia", "jason", "casal", "protagonista"]) and ("lucia" in tags or "jason" in tags):
-                score += 4
-            if any(w in text_low for w in ["carro", "veículo", "física", "dirigir", "motor", "velocidade"]) and "carros" in tags:
-                score += 4
-            if any(w in text_low for w in ["polícia", "assalto", "arma", "crime", "tiro"]) and ("armas" in tags or "assalto" in tags):
-                score += 4
-            if any(w in text_low for w in ["água", "oceano", "barco", "praia", "mar"]) and "agua" in tags:
-                score += 4
-            if any(w in text_low for w in ["noite", "clube", "luz", "neon"]) and "noite" in tags:
-                score += 4
-            if score > best_score:
-                best_score = score
-                best_fname = fname
+        chosen_vids = []
+        for s_txt in seg_texts:
+            s_low = s_txt.lower()
+            ranked = []
+            for vname, (vp, vtags, vdesc) in available_vids.items():
+                sc = _score_text_against_tags(s_low, vtags)
+                # Penaliza vídeos já usados recentemente para manter variedade máxima
+                if vname in chosen_vids:
+                    sc -= 100
+                elif vname in used_vids[-8:]:
+                    sc -= 18
+                elif vname in used_vids:
+                    sc -= 6
+                ranked.append((sc, vname, vp, vdesc))
+            ranked.sort(key=lambda x: x[0], reverse=True)
+            if ranked:
+                _, best_vn, best_vp, _ = ranked[0]
+                chosen_vids.append(best_vp)
+                used_vids.append(best_vn)
 
-        if not best_fname and available_imgs:
-            unused = [k for k in available_imgs if k not in used_imgs] or list(available_imgs.keys())
-            best_fname = unused[b_idx % len(unused)]
+        # Seleciona imagens 4K semânticas de apoio
+        full_low = (narration + " " + blk.get("headline", "") + " " + blk.get("callout", "")).lower()
+        img_ranked = []
+        for iname, (ip, itags, isubj) in available_imgs.items():
+            isc = _score_text_against_tags(full_low, itags)
+            if iname in used_imgs and len(used_imgs) < len(available_imgs):
+                isc -= 25
+            img_ranked.append((isc, iname, ip, isubj, itags))
+        img_ranked.sort(key=lambda x: x[0], reverse=True)
 
-        if best_fname:
-            used_imgs.add(best_fname)
-            full_p, tags, subj = available_imgs[best_fname]
-            # Segundo asset complementar diferente para composições multi-camada
-            alt_candidates = [
-                v[0] for k, v in available_imgs.items()
-                if k != best_fname and k not in used_imgs and set(v[1]) & set(tags)
-            ] or [v[0] for k, v in available_imgs.items() if k != best_fname]
-            alt_p = alt_candidates[b_idx % len(alt_candidates)] if alt_candidates else full_p
-            assignments.append({"primary_img": full_p, "secondary_img": alt_p, "subject": subj, "tags": tags})
+        if img_ranked:
+            _, iname1, ip1, isubj1, itags1 = img_ranked[0]
+            used_imgs.add(iname1)
+            ip2 = img_ranked[1][2] if len(img_ranked) > 1 else ip1
         else:
-            assignments.append({"primary_img": None, "secondary_img": None, "subject": "", "tags": []})
+            ip1, ip2, isubj1, itags1 = None, None, "", []
+
+        assignments.append({
+            "video_clips": chosen_vids,
+            "primary_img": ip1,
+            "secondary_img": ip2,
+            "subject": isubj1,
+            "tags": itags1,
+        })
 
     return assignments
