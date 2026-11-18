@@ -95,12 +95,12 @@ def generate_react_script(video_path, original_title="Viral Video", original_des
             for r in (research_brief.get("top_references") or [])[:6]
         )
         ref_block = f"""
-TEMA OBRIGATÓRIO DO CANAL NESTA SEMANA (LANÇAMENTO NA QUINTA-FEIRA): **GTA 6 (Grand Theft Auto VI)**
-Ângulo específico deste vídeo: "{research_brief.get('chosen_angle', original_title)}"
-Referências virais de canais grandes bombando AGORA:
+TEMA OBRIGATÓRIO DO CANAL (JOGO LANÇADO & LIVES BOMBANDO AGORA): **GTA 6 (Grand Theft Auto VI)**
+Ângulo específico deste corte: "{research_brief.get('chosen_angle', original_title)}"
+Lives e vídeos de criadores grandes bombando AGORA (Davy Jones / Gameplayrj, Bistecone, SanInPlay, Flow Games):
 {top_titles}
-Notícias/hipóteses atuais: {research_brief.get('grounding_notes', '')[:450]}
-Missão neste Short (meta: 30.000+ views): transformar essa cena/corte de GTA 6 em curiosidade viciante, top novidades, segredo escondido ou teoria polêmica para quem está contando as horas para quinta-feira!
+Destaques das lives de hoje: {research_brief.get('grounding_notes', '')[:450]}
+Missão neste Short (meta: 50.000 a 1M+ views, estilo referência viral de curiosidades e cortes de GTA 6): criar um corte eletrizante sobre o que os streamers (Davy Jones, Bistecone, SanInPlay) acabaram de descobrir jogando GTA 6 ao vivo ou uma função/segredo absurdo da gameplay real!
 """
 
     prompt = f"""Você é um criador gamer brasileiro TOP 1% de YouTube Shorts focado em BATER 30K–1M+ DE VIEWS (meta: swipe rate > 84%, retenção média > 115% em loop e explosão de comentários) + CONTEÚDO TRANSFORMATIVO autêntico.
@@ -177,4 +177,10 @@ Responda APENAS com um JSON válido:
     script["video_duration"] = duration
     script["model_used"] = data.get("_model", "gemini-2.5-flash")
     script["used_audio_context"] = bool(audio_b64)
+    try:
+        from producao.agentes import AgenteAuditorViral  # noqa: WPS433
+
+        script = AgenteAuditorViral.auditar_e_otimizar_viralizacao(script, formato="short")
+    except Exception as e_aud:
+        print(f"[BRAIN] Aviso Auditor Viral: {e_aud}")
     return script
