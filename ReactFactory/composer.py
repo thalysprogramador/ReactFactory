@@ -48,27 +48,42 @@ def draw_caption_chunk(frame_bgr, text, highlight_idx=-1):
         return frame_bgr
 
     img_pil = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(img_pil)
-    font = load_font(88)
+    draw = ImageDraw.Draw(img_pil, "RGBA")
+    font = load_font(74)
 
     words = text.upper().split()
     if not words:
         return frame_bgr
 
-    # Quebra em no máximo 2 linhas de 2 a 3 palavras para ficar GIGANTE na tela
     lines = []
     curr = []
     w_idx = 0
     for w in words:
         curr.append((w, w_idx == highlight_idx))
         w_idx += 1
-        if len(curr) >= 3:
+        if len(curr) >= 2:
             lines.append(curr)
             curr = []
     if curr:
         lines.append(curr)
 
-    y_base = 985 if len(lines) > 1 else 1045
+    y_base = 995 if len(lines) > 1 else 1055
+    max_lw = 0
+    for line in lines[:2]:
+        s = " ".join(w for w, _ in line)
+        bb = draw.textbbox((0, 0), s, font=font)
+        max_lw = max(max_lw, bb[2] - bb[0])
+    box_h = 96 * min(2, len(lines)) + 28
+    bx1 = max(24, (1080 - max_lw) // 2 - 36)
+    bx2 = min(1056, (1080 + max_lw) // 2 + 36)
+    draw.rounded_rectangle(
+        [bx1, y_base - 18, bx2, y_base + box_h - 18],
+        radius=22,
+        fill=(9, 11, 18, 224),
+        outline=(255, 42, 133, 210),
+        width=3,
+    )
+
     for line in lines[:2]:
         full_line_str = " ".join(w for w, _ in line)
         bbox = draw.textbbox((0, 0), full_line_str, font=font)
@@ -76,51 +91,73 @@ def draw_caption_chunk(frame_bgr, text, highlight_idx=-1):
         x_cursor = (1080 - line_w) // 2
 
         for word_str, is_active in line:
-            color = (255, 235, 0) if is_active else (255, 255, 255)
-            # Sombra projetada + Contorno preto grosso
+            wb_only = draw.textbbox((0, 0), word_str, font=font)
+            ww = wb_only[2] - wb_only[0]
+            wh = wb_only[3] - wb_only[1]
+            if is_active:
+                draw.rounded_rectangle(
+                    [x_cursor - 10, y_base - 6, x_cursor + ww + 10, y_base + wh + 14],
+                    radius=12,
+                    fill=(255, 42, 133, 245),
+                )
+                color = (255, 235, 0, 255)
+            else:
+                color = (248, 250, 252, 255)
             draw.text(
                 (x_cursor, y_base),
                 word_str,
                 font=font,
                 fill=color,
-                stroke_width=8,
-                stroke_fill=(0, 0, 0),
+                stroke_width=6,
+                stroke_fill=(0, 0, 0, 255),
             )
             wb = draw.textbbox((0, 0), word_str + " ", font=font)
             x_cursor += (wb[2] - wb[0])
-        y_base += 98
+        y_base += 94
 
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
-def draw_top_headline(frame_bgr, headline_text):
+def draw_top_headline(frame_bgr, headline_text, progress_0_1=0.5):
     if not headline_text:
         return frame_bgr
     img_pil = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(img_pil)
-    font = load_font(54)
+    draw = ImageDraw.Draw(img_pil, "RGBA")
+    font = load_font(50)
+    f_tag = load_font(24)
+
+    draw.rectangle([0, 0, 1080, 10], fill=(15, 19, 32, 220))
+    pw = max(12, int(1080 * max(0.0, min(1.0, progress_0_1))))
+    draw.rectangle([0, 0, pw, 10], fill=(255, 42, 133, 255))
+
+    draw.rounded_rectangle([32, 22, 410, 58], radius=8, fill=(9, 11, 18, 220), outline=(0, 230, 118, 230), width=2)
+    draw.ellipse([46, 33, 60, 47], fill=(0, 230, 118, 255))
+    draw.text((68, 27), "DOSSIE GTA VI // VERIFICADO", font=f_tag, fill=(0, 230, 118, 255))
+
+    draw.rounded_rectangle([740, 22, 1048, 58], radius=8, fill=(9, 11, 18, 220), outline=(0, 240, 255, 220), width=2)
+    draw.text((760, 27), "LANCAMENTO // 19 NOV", font=f_tag, fill=(0, 240, 255, 255))
 
     clean_text = headline_text.upper().strip()
-    # Mantém acentos em português, remove apenas emojis que a fonte Impact não renderiza
-    clean_text = "".join(c for c in clean_text if ord(c) < 65000).strip() or "ESPERA ATÉ O FINAL!"
+    clean_text = "".join(c for c in clean_text if ord(c) < 65000).strip() or "SEGREDO DO GTA 6!"
     bbox = draw.textbbox((0, 0), clean_text, font=font)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
 
-    pad_x, pad_y = 38, 20
-    x1 = max(30, (1080 - tw) // 2 - pad_x)
-    y1 = 64
-    x2 = min(1050, (1080 + tw) // 2 + pad_x)
+    pad_x, pad_y = 36, 18
+    x1 = max(28, (1080 - tw) // 2 - pad_x)
+    y1 = 72
+    x2 = min(1052, (1080 + tw) // 2 + pad_x)
     y2 = y1 + th + pad_y * 2
 
-    draw.rounded_rectangle([x1, y1, x2, y2], radius=24, fill=(12, 12, 18), outline=(255, 225, 0), width=5)
+    draw.rounded_rectangle([x1, y1, x2, y2], radius=18, fill=(9, 11, 18, 232), outline=(0, 240, 255, 245), width=3)
+    draw.rectangle([x1, y1, x1 + 10, y2], fill=(255, 42, 133, 255))
     draw.text(
-        ((1080 - tw) // 2, y1 + pad_y - 6),
+        ((1080 - tw) // 2 + 4, y1 + pad_y - 6),
         clean_text,
         font=font,
-        fill=(255, 255, 255),
-        stroke_width=3,
-        stroke_fill=(0, 0, 0),
+        fill=(255, 235, 40, 255),
+        stroke_width=4,
+        stroke_fill=(0, 0, 0, 255),
     )
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
@@ -340,14 +377,32 @@ def compose_react_short(
         elif t < t_inter_end:
             inter_t = t - t_part1_end
             prog = inter_t / max(0.1, inter_dur)
-            v_frame = viral_reader.get_frame_at(inter_sec, loop=False)
-            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.10 + 0.08 * prog)
-            gray = cv2.cvtColor(top_img, cv2.COLOR_BGR2GRAY)
-            gray_bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-            top_img = cv2.addWeighted(top_img, 0.45, gray_bgr, 0.55, -15)
-            if inter_t < 0.12:
-                flash_w = 0.45 * (1.0 - inter_t / 0.12)
-                top_img = cv2.addWeighted(top_img, 1.0 - flash_w, np.full_like(top_img, 255), flash_w, 0)
+            # Vídeo continua em movimento lento + Lupa 2.0x estilo After Effects + Retícula Giratória
+            v_frame = viral_reader.get_frame_at(inter_sec + inter_t * 0.35, loop=True)
+            top_img = crop_resize(v_frame, 1080, top_h, zoom=1.08 + 0.06 * prog)
+            # Lupa circular 2.0x destacando o centro da ação
+            lx = int(540 + 95 * math.sin(inter_t * 2.6))
+            ly = int(560 + 55 * math.cos(inter_t * 2.2))
+            lr = 165
+            cy1, cy2 = max(0, ly - lr // 2), min(top_h, ly + lr // 2)
+            cx1, cx2 = max(0, lx - lr // 2), min(1080, lx + lr // 2)
+            sub_crop = top_img[cy1:cy2, cx1:cx2]
+            if sub_crop.size > 0:
+                zoomed_crop = cv2.resize(sub_crop, (lr * 2, lr * 2), interpolation=cv2.INTER_LINEAR)
+                lmask = np.zeros((lr * 2, lr * 2), dtype=np.uint8)
+                cv2.circle(lmask, (lr, lr), lr - 4, 255, -1)
+                zy1, zy2 = max(0, ly - lr), min(top_h, ly + lr)
+                zx1, zx2 = max(0, lx - lr), min(1080, lx + lr)
+                roi = top_img[zy1:zy2, zx1:zx2]
+                if roi.shape[:2] == (lr * 2, lr * 2):
+                    np.copyto(roi, zoomed_crop, where=(lmask[:, :, None] > 0))
+                cv2.circle(top_img, (lx, ly), lr, (255, 240, 0), 4, cv2.LINE_AA)
+                cv2.circle(top_img, (lx, ly), lr + 12, (133, 42, 255), 2, cv2.LINE_AA)
+
+            # Glitch cromático nos primeiros 0.16s da interrupção
+            if inter_t < 0.16:
+                b_ch, g_ch, r_ch = cv2.split(top_img)
+                top_img = cv2.merge([np.roll(b_ch, -14, axis=1), g_ch, np.roll(r_ch, 14, axis=1)])
 
             av_frame = inter_reader.get_frame_at(inter_t, loop=False)
             bot_img = crop_resize(av_frame, 1080, bot_h, zoom=1.09 + 0.05 * prog, pan_x=-0.16 * math.sin(inter_t * 2.4))
@@ -381,10 +436,17 @@ def compose_react_short(
         canvas[0:top_h, :] = top_img
         canvas[top_h:1920, :] = bot_img
 
-        bar_color = (0, 230, 255) if is_speaking else (255, 190, 0)
-        cv2.rectangle(canvas, (0, top_h - 6), (1080, top_h + 6), bar_color, -1)
+        # Divisor Equalizador Neon Audio-Reativo (estilo After Effects)
+        cv2.rectangle(canvas, (0, top_h - 10), (1080, top_h + 10), (12, 14, 24), -1)
+        bar_color = (255, 240, 0) if is_speaking else (133, 42, 255)
+        cv2.line(canvas, (0, top_h), (1080, top_h), bar_color, 3)
+        for eq_i in range(36):
+            eq_x = 30 + eq_i * 29
+            amp = int(22 * abs(math.sin(t * 14.0 + eq_i * 0.55))) if is_speaking else int(6 * abs(math.sin(t * 4.0 + eq_i)))
+            eq_col = (133, 42, 255) if eq_i % 2 == 0 else (255, 240, 0)
+            cv2.rectangle(canvas, (eq_x - 4, top_h - amp), (eq_x + 4, top_h + amp), eq_col, -1)
 
-        canvas = draw_top_headline(canvas, headline)
+        canvas = draw_top_headline(canvas, headline, progress_0_1=(t / max(0.1, t_total)))
 
         if caption_str:
             canvas = draw_caption_chunk(canvas, caption_str, active_word_idx)
