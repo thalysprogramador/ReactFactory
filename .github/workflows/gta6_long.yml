@@ -20,12 +20,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install System Fonts & FFmpeg & Deno
+      - name: Set up Node.js 20 for Remotion Studio
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install System Fonts, FFmpeg, Chromium Deps & Deno
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-liberation unzip
+          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-liberation unzip libnss3 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2t64 || sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-liberation unzip libnss3 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1
           curl -fsSL https://deno.land/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
+          cd ReactFactory/studio && npm install --no-audit --no-fund
 
       - name: Install Python Dependencies
         run: |
