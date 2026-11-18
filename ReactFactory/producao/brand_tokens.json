@@ -1,0 +1,53 @@
+{
+  "brand_name": "CORTES TODO DIA // DOSSIÊ LEONIDA",
+  "aesthetic": "Vice Pulse Editorial — Jornalismo e Entretenimento de Games de Alta Retenção",
+  "colors": {
+    "bg_deep": "#090B12",
+    "bg_panel": "rgba(15, 19, 32, 0.86)",
+    "bg_glass": "rgba(22, 28, 46, 0.72)",
+    "vice_magenta": "#FF2A85",
+    "ocean_cyan": "#00F0FF",
+    "sun_amber": "#FFB800",
+    "emerald_verified": "#00E676",
+    "rumor_orange": "#FF6D00",
+    "theory_purple": "#B388FF",
+    "text_primary": "#F8FAFC",
+    "text_secondary": "#94A3B8",
+    "border_subtle": "rgba(255, 255, 255, 0.14)"
+  },
+  "typography": {
+    "display": "Bebas Neue, Impact, Arial Black, sans-serif",
+    "sans": "Montserrat, Inter, Segoe UI, sans-serif",
+    "mono": "JetBrains Mono, Consolas, monospace"
+  },
+  "verification_badges": {
+    "OFICIAL": {
+      "label": "FONTE OFICIAL ROCKSTAR",
+      "color": "#00E676",
+      "bg": "rgba(0, 230, 118, 0.16)"
+    },
+    "CONFIRMADO": {
+      "label": "CONFIRMADO POR FONTES",
+      "color": "#00F0FF",
+      "bg": "rgba(0, 240, 255, 0.16)"
+    },
+    "RUMOR": {
+      "label": "RUMOR / NÃO OFICIAL",
+      "color": "#FF6D00",
+      "bg": "rgba(255, 109, 0, 0.18)"
+    },
+    "TEORIA": {
+      "label": "ANÁLISE & TEORIA DA COMUNIDADE",
+      "color": "#B388FF",
+      "bg": "rgba(179, 136, 255, 0.18)"
+    }
+  },
+  "leonida_locations": {
+    "vice_city": {"name": "VICE CITY", "coords": "25.7617° N, 80.1918° W", "x": 0.74, "y": 0.62, "desc": "Metrópole neon, Ocean Beach, Vice Beach e distrito financeiro"},
+    "leonida_keys": {"name": "LEONIDA KEYS", "coords": "24.5551° N, 81.7800° W", "x": 0.56, "y": 0.86, "desc": "Arquipélago tropical sul, pontes oceânicas e vida marinha densa"},
+    "grassrivers": {"name": "GRASSRIVERS", "coords": "25.8500° N, 80.9300° W", "x": 0.52, "y": 0.66, "desc": "Pântanos indomáveis, aerobarcos e ecossistema selvagem"},
+    "port_gellhorn": {"name": "PORT GELLHORN", "coords": "26.6406° N, 81.8723° W", "x": 0.28, "y": 0.52, "desc": "Costa industrial oeste, motéis, lojas de penhores e docas"},
+    "ambrosia": {"name": "AMBROSIA", "coords": "26.7500° N, 80.6500° W", "x": 0.54, "y": 0.42, "desc": "Coração industrial açucareiro e gangues de motociclistas"},
+    "mount_kalaga": {"name": "MOUNT KALAGA", "coords": "30.4383° N, 83.2000° W", "x": 0.44, "y": 0.18, "desc": "Parque nacional ao norte, cânions, trilhas off-road e caça"}
+  }
+}
