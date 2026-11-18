@@ -49,11 +49,7 @@ def run_pipeline(do_upload=False):
     )
     print("[ROTEIRO GERADO]:", json.dumps(script_data, indent=2, ensure_ascii=False))
 
-    clips = pick_avatar_clips(script_data.get("reaction_mood", "chocado"))
-    print(f"[AVATAR] Clipes selecionados: fala={[os.path.basename(p) for p in clips['talking']]} | "
-          f"reação1={os.path.basename(clips['reaction_primary'])} | reação2={os.path.basename(clips['reaction_secondary'])}")
-
-    print("[3/5] Gerando vozes realistas e sincronizando lábios via ByteDance LatentSync v1.5 (Kaggle T4)...")
+    print("[3/5] Gerando narração profissional padronizada (Gemini 3.8 Flash TTS 'Orus' -14.5 LUFS)...")
     hook_wav = os.path.join(TEMP_DIR, "voice_hook.wav")
     inter_wav = os.path.join(TEMP_DIR, "voice_inter.wav")
     outro_wav = os.path.join(TEMP_DIR, "voice_outro.wav")
@@ -71,26 +67,18 @@ def run_pipeline(do_upload=False):
         },
     )
 
-    synced = generate_batch_lipsync_clips(
-        hook_wav=hook_wav,
-        inter_wav=inter_wav,
-        outro_wav=outro_wav,
-        talking_clips=clips["talking"],
-        out_dir=TEMP_DIR,
-    )
-
-    print("[4/5] Renderizando edição V4 (Reação Silenciosa Variada + LatentSync + Legendas Gigantes)...")
+    print("[4/5] Renderizando Short V3 (Full-Screen Cortes de Lives + Proporção Cinema + Legendas Gigantes Sem Caixa)...")
     final_output = os.path.join(BASE_DIR, "output_react_short_v4.mp4")
     compose_react_short(
         viral_video_path=viral_path,
-        hook_avatar_mp4=synced["hook"],
+        hook_avatar_mp4=None,
         hook_audio_wav=hook_wav,
-        interrupt_avatar_mp4=synced["inter"],
+        interrupt_avatar_mp4=None,
         interrupt_audio_wav=inter_wav,
-        outro_avatar_mp4=synced["outro"],
+        outro_avatar_mp4=None,
         outro_audio_wav=outro_wav,
-        idle_avatar_mp4=clips["reaction_primary"],
-        idle_avatar_mp4_2=clips["reaction_secondary"],
+        idle_avatar_mp4=None,
+        idle_avatar_mp4_2=None,
         script_data=script_data,
         sfx_whoosh_path=sfx_whoosh,
         sfx_freeze_path=sfx_freeze,
@@ -101,8 +89,8 @@ def run_pipeline(do_upload=False):
     try:
         build_short_thumbnail(
             viral_video_path=viral_path,
-            headline_text=script_data.get("headline_top", "GTA 6!"),
-            reaction_video_path=clips["reaction_primary"],
+            headline_text=script_data.get("headline_top", "TRAVOU A LIVE NO GTA 6!"),
+            reaction_video_path=None,
             out_jpg=short_thumb,
         )
     except Exception as terr:
