@@ -84,40 +84,13 @@ Responda APENAS com JSON válido seguindo exatamente esta estrutura:
         ]
     ]
 
-    last_err = None
-    data = None
-    for model in ["gemini-2.5-flash", "gemini-3.5-flash"]:
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "safetySettings": safety,
-            "generationConfig": {
-                "temperature": 0.72,
-                "responseMimeType": "application/json",
-            },
-        }
-        try:
-            print(f"[GTA6 LONG BRAIN] Gerando roteiro storytelling 5 Atos com {model}...", flush=True)
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
-            cands = body.get("candidates") or []
-            if not cands:
-                raise RuntimeError(f"Sem candidates ({body.get('promptFeedback')})")
-            data = json.loads(cands[0]["content"]["parts"][0]["text"])
-            data["model_used"] = model
-            break
-        except Exception as err:
-            last_err = err
-            print(f"[GTA6 LONG BRAIN] Aviso {model}: {err}", flush=True)
+    from producao.gemini_client import gemini_text  # noqa: WPS433
 
+    print("[GTA6 LONG BRAIN] Gerando roteiro storytelling 5 Atos com retry resiliente...", flush=True)
+    data, model_used = gemini_text(prompt, json_mode=True, temperature=0.72)
+    data["model_used"] = model_used
     if not data or not data.get("acts"):
-        raise RuntimeError(f"Falha no Gemini ao gerar roteiro GTA 6 longo: {last_err}")
+        raise RuntimeError("Falha no Gemini ao gerar roteiro GTA 6 longo: retorno vazio")
 
     # Quebra qualquer bloco que tenha passado de 290 caracteres em sub-blocos limpos por pontuação
     for act in data["acts"]:
