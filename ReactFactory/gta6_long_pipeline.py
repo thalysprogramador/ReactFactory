@@ -44,10 +44,10 @@ def run_gta6_long_pipeline(do_upload=False):
     # ETAPA 4: Direção Criativa (Agente 1)
     direcao = AgenteDiretorCriativo.definir_direcao_criativa(research, formato="long")
 
-    # ETAPAS 5-6: Roteiro verificado + Storyboard semântico (Agente 2)
+    # ETAPAS 5-6: Roteiro verificado + Storyboard semântico (Agente 2) — 5 Atos x 5 blocos (~8,5 min)
     try:
         script_data = AgentePesquisadorRoteirista.gerar_roteiro_longo_verificado(
-            research, direcao, num_acts=5, blocks_per_act=7
+            research, direcao, num_acts=5, blocks_per_act=5
         )
     except Exception as err_ag2:
         print(f"[GTA6 STUDIO] Aviso Agente 2 ({err_ag2}) -> usando gerador de contingência.")
