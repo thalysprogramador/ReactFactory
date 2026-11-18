@@ -1,40 +1,46 @@
 import React from "react";
 import { Composition } from "remotion";
 import { GtaStudioScene, SceneProps } from "./GtaStudioComp";
+import { GtaThumbnail3D, Thumb3DProps } from "./GtaThumbnail3D";
 
 const defaultProps: SceneProps = {
   sceneType: "map_zoom",
   badgeType: "OFICIAL",
-  sourceLabel: "Rockstar Games Official / rockstargames.com/VI",
+  sourceLabel: "Live Gameplayrj (Davy Jones) & Bistecone • GTA VI",
   actNum: 1,
   totalActs: 5,
-  actTitle: "O MAPA DE LEONIDA E VICE CITY",
-  headline: "6 REGIÕES CONFIRMADAS EM LEONIDA",
-  subheadline: "Do arquipélago de Leonida Keys às montanhas de Mount Kalaga",
+  actTitle: "PRIMEIRAS HORAS EM VICE CITY",
+  headline: "VICE CITY & LEONIDA KEYS",
+  subheadline: "O mapa real de Leonida explorado ao vivo nas primeiras horas de GTA 6",
   locationKey: "vice_city",
   characterName: "LUCIA & JASON",
   characterRole: "Protagonistas Centrais — Estado de Leonida",
   characterFacts: [
-    "Primeiro casal protagonista desde o GTA clássico",
+    "Início na penitenciária de Leonida e fuga para Vice City",
     "Sistema de troca dinâmica e assaltos coordenados",
-    "Fuga pelo interior de Leonida após golpe dar errado"
+    "Celular com redes sociais e apps interativos em tempo real"
   ],
-  statValue: "19 NOV",
-  statUnit: "QUINTA-FEIRA • 00:00",
-  statLabel: "LANÇAMENTO GLOBAL CONFIRMADO PELA ROCKSTAR",
+  statValue: "9.4M+",
+  statUnit: "VIEWS NAS LIVES DE LANÇAMENTO",
+  statLabel: "IMPACTO GLOBAL NAS PRIMEIRAS HORAS",
   comparisonItems: [
-    { label: "GTA V (Los Santos - 2013)", value: 45, display: "76 km² • 1 Cidade" },
-    { label: "GTA VI (Estado de Leonida - 2026)", value: 100, display: "6 Regiões • Vice City + Interior" }
+    { label: "GTA V (Los Santos - 2013)", value: 42, display: "76 km² • 1 Cidade" },
+    { label: "GTA VI (Estado de Leonida - 2026)", value: 100, display: "175 km² • 6 Regiões" }
   ],
   primaryImageUrl: "",
   secondaryImageUrl: "",
-  words: [
-    { w: "Faltam", s: 0.0, e: 0.5 },
-    { w: "menos", s: 0.5, e: 0.9 },
-    { w: "de", s: 0.9, e: 1.1 },
-    { w: "48", s: 1.1, e: 1.6 },
-    { w: "horas", s: 1.6, e: 2.2 }
-  ]
+  words: []
+};
+
+const defaultThumbProps: Thumb3DProps = {
+  heroImageUrl: "",
+  livePipUrl: "",
+  topKicker: "GTA VI • GAMEPLAY REAL",
+  line1: "ELES TRAVARAM",
+  line2: "AO VIVO!",
+  subline: "DAVY JONES & BISTECONE EM VICE CITY",
+  liveLabel: "AO VIVO • PS5 PRO",
+  accentColor: "#FFBE0B"
 };
 
 export const RemotionRoot: React.FC = () => {
@@ -57,6 +63,15 @@ export const RemotionRoot: React.FC = () => {
         width={1080}
         height={1920}
         defaultProps={{ ...defaultProps, isVertical: true }}
+      />
+      <Composition
+        id="GtaThumbnail3D"
+        component={GtaThumbnail3D}
+        durationInFrames={2}
+        fps={24}
+        width={1280}
+        height={720}
+        defaultProps={defaultThumbProps}
       />
     </>
   );
