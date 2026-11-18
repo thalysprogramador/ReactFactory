@@ -164,29 +164,17 @@ Responda APENAS com um JSON válido:
         }
     }
 
-    for model_name in ["gemini-3.5-flash", "gemini-2.5-flash"]:
-        try:
-            print(f"[BRAIN] Gerando roteiro afiado com {model_name}...")
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                text_resp = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                if text_resp.startswith("```"):
-                    text_resp = text_resp.strip("`")
-                    if text_resp.lower().startswith("json"):
-                        text_resp = text_resp[4:].strip()
-                script = json.loads(text_resp)
-                script["video_duration"] = duration
-                script["model_used"] = model_name
-                script["used_audio_context"] = bool(audio_b64)
-                return script
-        except Exception as e:
-            print(f"[BRAIN] Fallback de {model_name} ({e})...")
+    from producao.gemini_client import gemini_generate  # noqa: WPS433
 
-    raise RuntimeError("Não foi possível gerar o roteiro no Gemini.")
+    print("[BRAIN] Gerando roteiro afiado com retry resiliente...")
+    data = gemini_generate(payload)
+    text_resp = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    if text_resp.startswith("```"):
+        text_resp = text_resp.strip("`")
+        if text_resp.lower().startswith("json"):
+            text_resp = text_resp[4:].strip()
+    script = json.loads(text_resp)
+    script["video_duration"] = duration
+    script["model_used"] = data.get("_model", "gemini-2.5-flash")
+    script["used_audio_context"] = bool(audio_b64)
+    return script
