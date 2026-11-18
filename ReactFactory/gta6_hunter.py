@@ -45,26 +45,26 @@ GTA6_TIKTOK_CREATORS = [
 ]
 
 GTA6_SHORT_ANGLES = [
-    "O GTA 6 já liberou na Nova Zelândia: primeiras cenas reais e reações dos influenciadores",
-    "Primeiras horas jogando GTA 6 em Vice City: os detalhes que deixaram os streamers em choque",
-    "5 segredos absurdos confirmados para o GTA 6 que ninguém percebeu no trailer",
-    "Como o sistema de polícia e NPCs com IA do GTA 6 vai destruir o GTA 5",
-    "Por que o lançamento do GTA 6 na quinta-feira vai parar a internet mundial",
-    "Os detalhes mais realistas de Vice City e Leonida revelados pela Rockstar",
-    "Teorias chocantes sobre a história de Lucia e Jason no GTA 6",
-    "Coisas insanas do mapa gigante de GTA 6 comparadas com o GTA 5",
-    "O preço e as edições do GTA 6: o que realmente vale a pena no dia do lançamento",
-    "Carros, motos, barcos e física revolucionária confirmada no GTA 6",
+    "Davy Jones e Bistecone em choque na primeira missão do GTA 6 ao vivo: o detalhe que ninguém esperava",
+    "Funções secretas do celular no GTA 6 que deixaram os streamers de queixo caído nas lives",
+    "Bistecone testando a velocidade dos barcos e o oceano de Leonida Keys no GTA 6 ao vivo",
+    "O início do GTA 6 com Lucia na prisão: a reação do Davy Jones (Gameplayrj) ao ver os gráficos reais",
+    "Explorando a praia de Vice City no GTA 6 ao vivo: a inteligência artificial absurda dos NPCs",
+    "Como a polícia do GTA 6 encurrala o jogador: o momento mais tenso das lives de lançamento",
+    "Davy Jones descobrindo o tamanho real do mapa de Vice City e Leonida nas primeiras horas de GTA 6",
+    "Física de batidas e destruição de carros no GTA 6 ao vivo: o teste que parou a live do Bistecone",
+    "7 segredos insanos que os streamers já descobriram na primeira hora jogando GTA 6 no PS5 Pro",
+    "Lucia e Jason no primeiro assalto do GTA 6: tudo que rolou nas lives de Gameplayrj e Flow Games",
 ]
 
 GTA6_LONG_ANGLES = [
-    "GTA 6 LIBERADO NA NOVA ZELÂNDIA: AS PRIMEIRAS HORAS REAIS, GAMEPLAY E REAÇÕES EM VICE CITY",
-    "COMO VAI SER O DIA DO LANÇAMENTO DO GTA 6 (A QUINTA-FEIRA QUE VAI PARAR O MUNDO)",
-    "TUDO QUE A ROCKSTAR ESCONDEU NO GTA 6: SEGREDOS, MAPA E TEORIAS QUE VOCÊ PERDEU",
-    "POR QUE O GTA 6 VAI MUDAR OS GAMES PARA SEMPRE (E NADA SERÁ IGUAL DEPOIS DE QUINTA)",
-    "AS PRIMEIRAS HORAS JOGANDO GTA 6: O GUIA DEFINITIVO DE LEONIDA E VICE CITY",
-    "7 MECÂNICAS REVOLUCIONÁRIAS QUE CONSERTAM TODOS OS ERROS DO GTA 5 NO GTA 6",
-    "A VERDADE POR TRÁS DE LUCIA E JASON: ANÁLISE PROFUNDA DA HISTÓRIA DO GTA 6",
+    "GTA 6 LANÇADO: O MELHOR DAS LIVES DO DAVY JONES E BISTECONE NAS PRIMEIRAS HORAS EM VICE CITY",
+    "O INÍCIO DO GTA 6 COMPLETO: ANÁLISE DA PRIMEIRA MISSÃO, REAÇÕES AO VIVO E SEGREDOS DE LEONIDA",
+    "TUDO QUE DESCOBRIRAM NAS LIVES DE GTA 6 HOJE: CELULAR, FÍSICA RAGE 9, MAPA E IA DOS NPCS",
+    "DAVY JONES, BISTECONE E SANINPLAY NO GTA 6: OS MOMENTOS MAIS INSANOS DO LANÇAMENTO AO VIVO",
+    "EXPLORANDO VICE CITY E LEONIDA KEYS NO GTA 6: O QUE REALMENTE MUDOU NA GAMEPLAY REAL",
+    "7 FUNÇÕES E MECÂNICAS SECRETAS DO GTA 6 QUE DEIXARAM OS STREAMERS EM CHOQUE NAS LIVES",
+    "A HISTÓRIA DE LUCIA E JASON NO GTA 6: ANÁLISE COMPLETA DO INÍCIO DO JOGO E PRIMEIRAS MISSÕES",
 ]
 
 _GTA_TERMS = ("gta", "grand theft auto", "rockstar", "vice city", "leonida", "lucia", "jason")
@@ -134,7 +134,21 @@ def research_gta6_references(kind="short"):
             "views": views,
             "duration": m.get("duration", 0),
         })
-    top_refs.sort(key=lambda x: x["views"], reverse=True)
+
+    # Busca ativa em tempo real das lives de Davy Jones (Gameplayrj), Bistecone, SanInPlay, Flow Games e Alanzoka
+    try:
+        from producao.catalog import discover_live_creator_videos  # noqa: WPS433
+
+        live_vids = discover_live_creator_videos(max_per_query=2)
+        seen_v = {r["id"] for r in top_refs}
+        for lv in live_vids:
+            if lv["id"] not in seen_v:
+                top_refs.append(lv)
+                seen_v.add(lv["id"])
+    except Exception as e_lv:
+        print(f"[GTA6 LIVE DISCOVERY] Aviso: {e_lv}")
+
+    top_refs.sort(key=lambda x: x.get("views", 0), reverse=True)
 
     news_headlines = []
     for q in ["GTA 6 lançamento novidades", "GTA 6 segredos trailer mapa"]:
@@ -340,12 +354,15 @@ def _try_tiktok_gta6_clip(output_path, used_ids):
 
 
 def _build_rockstar_montage_clip(mp4_vault, jpg_vault, output_path, bgm_path=None, angle_text="", research_data=None):
-    """Monta um clipe dinâmico multi-cenas (~22s) com vídeos reais semânticos do GTA 6 + BGM dinâmica."""
+    """Monta um clipe dinâmico multi-cenas (~24s) 100% em VÍDEO REAL (Lives Davy Jones/Bistecone + Gameplay GTA 6)."""
     from producao.catalog import select_semantic_assets  # noqa: WPS433
     from producao.sound_designer import fetch_dynamic_bgm_for_mood  # noqa: WPS433
 
     sem = select_semantic_assets(
-        [{"narration": angle_text, "headline": angle_text, "callout": "GTA 6"}, {"narration": "gameplay carros vice city lucia jason", "headline": "LEONIDA"}],
+        [
+            {"narration": "live davy jones bistecone gameplay " + angle_text, "headline": angle_text, "callout": "GTA 6"},
+            {"narration": "bistecone davy jones saninplay vice city lucia jason carros", "headline": "LEONIDA"},
+        ],
         prefer_horizontal=False,
         research_data=research_data,
         ffmpeg_exe=FFMPEG_EXE,
@@ -357,52 +374,19 @@ def _build_rockstar_montage_clip(mp4_vault, jpg_vault, output_path, bgm_path=Non
                 sem_vids.append(v)
 
     picks = sem_vids + [p for p in mp4_vault if p not in sem_vids]
-    chosen = picks[:6] if picks else list(mp4_vault)[:5]
+    chosen = picks[:7] if picks else list(mp4_vault)[:6]
     segs = []
     for i, src in enumerate(chosen):
         seg_p = os.path.join(GTA6_TEMP_DIR, f"short_cut_{i}.mp4")
-        d = min(4.2, max(3.0, get_media_duration(src)))
+        d = min(3.8, max(2.8, get_media_duration(src)))
+        # Mantém proporção widescreen 1920x1080 original (ZERO ultra-zoom e 100% vídeo real em movimento!)
         subprocess.run([
             FFMPEG_EXE, "-y", "-t", f"{d:.2f}", "-i", src,
-            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1",
+            "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,setsar=1",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-an",
             seg_p,
         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         segs.append(seg_p)
-
-    # Adiciona 2 cenas animadas rápidas de screenshots 4K oficiais para variar ritmo
-    if jpg_vault:
-        import cv2
-        import numpy as np
-
-        for k_idx, img_src in enumerate(random.sample(jpg_vault, min(2, len(jpg_vault)))):
-            kb_p = os.path.join(GTA6_TEMP_DIR, f"short_cut_kb_{k_idx}.mp4")
-            src = cv2.imread(img_src)
-            if src is not None:
-                sh, sw = src.shape[:2]
-                sc = max(1080.0 / sw, 1920.0 / sh)
-                src = cv2.resize(src, (max(1080, int(sw * sc)), max(1920, int(sh * sc))), interpolation=cv2.INTER_AREA)
-                x0, y0 = (src.shape[1] - 1080) // 2, (src.shape[0] - 1920) // 2
-                src = src[y0 : y0 + 1920, x0 : x0 + 1080].copy()
-                proc = subprocess.Popen(
-                    [
-                        FFMPEG_EXE, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", "1080x1920", "-r", "30", "-i", "pipe:0",
-                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-an", kb_p,
-                    ],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                for fi in range(110):
-                    z = 1.0 + 0.14 * (fi / 109.0) if k_idx % 2 == 0 else (1.14 - 0.12 * (fi / 109.0))
-                    cw, ch = int(1080 / z), int(1920 / z)
-                    cx, cy = (1080 - cw) // 2, (1920 - ch) // 2
-                    fr = cv2.resize(src[cy : cy + ch, cx : cx + cw], (1080, 1920), interpolation=cv2.INTER_LINEAR)
-                    proc.stdin.write(fr.tobytes())
-                proc.stdin.close()
-                proc.wait()
-                if os.path.exists(kb_p):
-                    segs.insert(min(len(segs), 1 + k_idx * 2), kb_p)
 
     concat_txt = os.path.join(GTA6_TEMP_DIR, "short_concat.txt")
     with open(concat_txt, "w", encoding="utf-8") as f:
