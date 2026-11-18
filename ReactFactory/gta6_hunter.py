@@ -229,31 +229,6 @@ def sync_rockstar_gta6_vault(max_mp4=10, max_jpg=22):
     ]
     random.shuffle(jpg_urls)
 
-    downloaded_mp4 = list(existing_mp4)
-    for idx, u in enumerate(mp4_urls[:max_mp4]):
-        dst = os.path.join(GTA6_VAULT_DIR, f"mp4_{idx:02d}.mp4")
-        if os.path.exists(dst) and os.path.getsize(dst) > 80_000:
-            if dst not in downloaded_mp4:
-                downloaded_mp4.append(dst)
-            continue
-        raw_dl = dst + ".raw.mp4"
-        try:
-            with urllib.request.urlopen(urllib.request.Request(u, headers=hdr), timeout=25) as r:
-                with open(raw_dl, "wb") as f:
-                    f.write(r.read())
-            subprocess.run([
-                FFMPEG_EXE, "-y", "-i", raw_dl,
-                "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,setsar=1",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-an",
-                dst,
-            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            os.remove(raw_dl)
-            downloaded_mp4.append(dst)
-        except Exception as err:
-            if os.path.exists(raw_dl):
-                os.remove(raw_dl)
-            print(f"[GTA6 VAULT] Aviso MP4 {idx}: {err}")
-
     downloaded_jpg = list(existing_jpg)
     for idx, u in enumerate(jpg_urls[:max_jpg]):
         dst = os.path.join(GTA6_VAULT_DIR, f"img_{idx:02d}.jpg")
@@ -271,7 +246,31 @@ def sync_rockstar_gta6_vault(max_mp4=10, max_jpg=22):
         except Exception:
             pass
 
-    print(f"[GTA6 VAULT] Vault atualizado: {len(downloaded_mp4)} MP4s + {len(downloaded_jpg)} JPGs oficiais!")
+    # Substitui os vídeos de máscara/sticker do site por clipes reais 1080p dos trailers oficiais da Rockstar
+    from producao.catalog import extract_real_trailer_clips, is_sticker_mask_video  # noqa: WPS433
+
+    trailers_dir = os.path.join(GTA6_TEMP_DIR, "trailers")
+    os.makedirs(trailers_dir, exist_ok=True)
+    for t_name, t_url in [
+        ("preload_now", "https://www.youtube.com/watch?v=sXCiA142w8Y"),
+        ("extended_look", "https://www.youtube.com/watch?v=f-prPijSTLo"),
+        ("the_festival", "https://www.youtube.com/watch?v=AvBcfBrBl60"),
+    ]:
+        tp = os.path.join(trailers_dir, f"{t_name}.mp4")
+        if not (os.path.exists(tp) and os.path.getsize(tp) > 300_000):
+            subprocess.run(
+                [
+                    sys.executable, "-m", "yt_dlp", "--ffmpeg-location", FFMPEG_EXE,
+                    "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
+                    "--merge-output-format", "mp4", "-o", tp, t_url,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+    downloaded_mp4 = [p for p in extract_real_trailer_clips(FFMPEG_EXE) if not is_sticker_mask_video(p)]
+    print(f"[GTA6 VAULT] Vault atualizado: {len(downloaded_mp4)} clipes reais 1080p + {len(downloaded_jpg)} JPGs 4K oficiais!")
     return downloaded_mp4, downloaded_jpg
 
 
@@ -355,17 +354,39 @@ def _build_rockstar_montage_clip(mp4_vault, jpg_vault, output_path, bgm_path=Non
         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         segs.append(seg_p)
 
-    # Adiciona 1 cena animada (Ken Burns) de screenshot 4K oficial para variar ritmo
+    # Adiciona 2 cenas animadas rápidas de screenshots 4K oficiais para variar ritmo
     if jpg_vault:
-        img_src = random.choice(jpg_vault)
-        kb_p = os.path.join(GTA6_TEMP_DIR, "short_cut_kb.mp4")
-        subprocess.run([
-            FFMPEG_EXE, "-y", "-loop", "1", "-t", "4.0", "-i", img_src,
-            "-vf", "scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880,zoompan=z='min(zoom+0.0018,1.18)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=120:s=1080x1920:fps=30,setsar=1",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-an",
-            kb_p,
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        segs.insert(2 if len(segs) >= 2 else 0, kb_p)
+        import cv2
+        import numpy as np
+
+        for k_idx, img_src in enumerate(random.sample(jpg_vault, min(2, len(jpg_vault)))):
+            kb_p = os.path.join(GTA6_TEMP_DIR, f"short_cut_kb_{k_idx}.mp4")
+            src = cv2.imread(img_src)
+            if src is not None:
+                sh, sw = src.shape[:2]
+                sc = max(1080.0 / sw, 1920.0 / sh)
+                src = cv2.resize(src, (max(1080, int(sw * sc)), max(1920, int(sh * sc))), interpolation=cv2.INTER_AREA)
+                x0, y0 = (src.shape[1] - 1080) // 2, (src.shape[0] - 1920) // 2
+                src = src[y0 : y0 + 1920, x0 : x0 + 1080].copy()
+                proc = subprocess.Popen(
+                    [
+                        FFMPEG_EXE, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", "1080x1920", "-r", "30", "-i", "pipe:0",
+                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-an", kb_p,
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                for fi in range(110):
+                    z = 1.0 + 0.14 * (fi / 109.0) if k_idx % 2 == 0 else (1.14 - 0.12 * (fi / 109.0))
+                    cw, ch = int(1080 / z), int(1920 / z)
+                    cx, cy = (1080 - cw) // 2, (1920 - ch) // 2
+                    fr = cv2.resize(src[cy : cy + ch, cx : cx + cw], (1080, 1920), interpolation=cv2.INTER_LINEAR)
+                    proc.stdin.write(fr.tobytes())
+                proc.stdin.close()
+                proc.wait()
+                if os.path.exists(kb_p):
+                    segs.insert(min(len(segs), 1 + k_idx * 2), kb_p)
 
     concat_txt = os.path.join(GTA6_TEMP_DIR, "short_concat.txt")
     with open(concat_txt, "w", encoding="utf-8") as f:
