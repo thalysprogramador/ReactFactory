@@ -188,6 +188,7 @@ def run_batch_lipsync_kaggle(jobs, out_dir, timeout_sec=1200, max_video_sec=8.0)
 
         deadline = time.time() + timeout_sec
         denied_count = 0
+        queued_count = 0
         while time.time() < deadline:
             time.sleep(20)
             rc_st, st_out = _run_kaggle(["kernels", "status", kernel_ref], env, check=False)
@@ -200,6 +201,11 @@ def run_batch_lipsync_kaggle(jobs, out_dir, timeout_sec=1200, max_video_sec=8.0)
                 continue
             if rc_st != 0 or "connecttimeouterror" in low or "max retries exceeded" in low or "connectionerror" in low:
                 # Erro transitório de rede ao consultar status: tenta novamente no próximo ciclo
+                continue
+            if "kernelworkerstatus.queued" in low or '"queued"' in low:
+                queued_count += 1
+                if queued_count >= 6:
+                    raise TimeoutError("Fila GPU Kaggle congestionada (QUEUED > 120s) — acionando fallback rápido.")
                 continue
             if "kernelworkerstatus.complete" in low or '"complete"' in low:
                 break
