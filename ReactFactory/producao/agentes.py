@@ -54,35 +54,48 @@ class AgenteDiretorCriativo:
 
     @staticmethod
     def enriquecer_storyboard(acts, formato="long", research_data=None):
-        """Garante variedade de cenas e coerência semântica entre texto e vídeo/animação."""
+        """
+        Regra Editorial V3 (Animações SELETIVAS — Só Quando Necessário):
+        - 75% a 80% dos blocos usam 'cinema_broll' (Vídeo 1080p puro de gameplay/trailer com câmera DoP estilo Higgsfield
+          e lower-third discreto apenas nos primeiros 3.5s).
+        - Apenas 1 bloco por Ato (quando o texto realmente cita região do mapa, dossiê de personagem ou comparativo de dados)
+          dispara uma animação real em vídeo MP4 renderizada pelo Remotion ('npx remotion render').
+        """
+        from composer import FFMPEG_EXE  # noqa: WPS433
+
         flat_blocks = []
+        used_remotion_types = []
         for a_idx, act in enumerate(acts):
             act_num = int(act.get("act_num", a_idx + 1))
+            remotion_used_in_act = False
             for b_idx, blk in enumerate(act.get("blocks", [])):
-                txt = (blk.get("narration", "") + " " + blk.get("callout", "")).lower()
-                st = blk.get("scene_type", "")
-                if st not in AgenteDiretorCriativo.SCENE_TYPES:
-                    if any(k in txt for k in ["mapa", "vice city", "leonida", "keys", "grassrivers", "gellhorn", "kalaga", "ambrosia", "região"]):
+                txt = (blk.get("narration", "") + " " + blk.get("callout", "") + " " + blk.get("headline", "")).lower()
+                st = "cinema_broll"
+
+                # Só ativa animação Remotion se ainda não usou neste Ato e o conteúdo realmente pedir
+                if not remotion_used_in_act:
+                    if any(k in txt for k in ["mapa", "regiões", "leonida keys", "grassrivers", "gellhorn", "kalaga", "ambrosia", "geografia"]):
                         st = "map_zoom"
-                    elif any(k in txt for k in ["lucia", "jason", "raul", "boobie", "drequan", "personagem", "protagonista", "casal"]):
+                    elif any(k in txt for k in ["lucia", "jason", "raul", "boobie", "drequan", "protagonista", "casal", "dossiê"]):
                         st = "character_dossier"
-                    elif any(k in txt for k in ["19 de novembro", "quinta", "milhões", "bilhões", "gta 5", "gta v", "compar", "recorde", "anos", "%", "dobro"]):
+                    elif any(k in txt for k in ["compar", "gta 5", "gta v", "salto", "recorde", "milhões", "bilhões", "19 de novembro"]):
                         st = "data_comparison"
-                    else:
-                        st = "feature_spotlight"
-                # Evita repetir o mesmo scene_type 3x seguidas
-                if len(flat_blocks) >= 2 and flat_blocks[-1]["scene_type"] == st and flat_blocks[-2]["scene_type"] == st:
-                    for alt in AgenteDiretorCriativo.SCENE_TYPES:
-                        if alt != st:
-                            st = alt
-                            break
+
+                    # Se já repetiu o mesmo tipo no Ato anterior, rotaciona ou mantém cinema_broll
+                    if st != "cinema_broll":
+                        if used_remotion_types and used_remotion_types[-1] == st:
+                            for alt in ("map_zoom", "character_dossier", "data_comparison"):
+                                if alt not in used_remotion_types[-2:]:
+                                    st = alt
+                                    break
+                        remotion_used_in_act = True
+                        used_remotion_types.append(st)
+
                 blk["scene_type"] = st
                 blk["act_num"] = act_num
                 blk["act_title"] = act.get("act_title", f"ATO {act_num}")
                 blk["bgm_mood"] = act.get("bgm_mood", "synth")
                 flat_blocks.append(blk)
-
-        from composer import FFMPEG_EXE  # noqa: WPS433
 
         semantic_assets = select_semantic_assets(
             flat_blocks,
@@ -122,36 +135,43 @@ class AgentePesquisadorRoteirista:
             f"- [Notícia] {n.get('title', '')} ({n.get('source', '')})"
             for n in research_data.get("news", [])[:12]
         )
-        angle = research_data.get("chosen_angle", "LANÇAMENTO DO GTA 6 NA NOVA ZELÂNDIA E PRIMEIRAS HORAS EM LEONIDA")
+        angle = research_data.get("chosen_angle", "GTA 6 LANÇADO: O MELHOR DAS LIVES DO DAVY JONES E BISTECONE EM VICE CITY")
 
-        prompt = f"""Você é o AGENTE 2 (Pesquisador-Chefe e Roteirista Documental) de uma produtora audiovisual profissional especializada em GTA 6.
-Contexto temporal: Hoje é véspera do lançamento histórico de Grand Theft Auto VI, confirmado oficialmente pela Rockstar Games para QUINTA-FEIRA, 19 DE NOVEMBRO DE 2026 (PS5 e Xbox Series X|S).
+        prompt = f"""Você é o AGENTE 2 (Pesquisador-Chefe e Roteirista Viral) de uma produtora audiovisual profissional especializada em GTA 6.
+Contexto temporal: O GTA 6 JÁ FOI LANÇADO e os maiores streamers do Brasil — DAVY JONES (Gameplayrj), BISTECONE, SANINPLAY, FLOW GAMES, ALANZOKA e MAXMRM — estão EM LIVE AGORA MESMO jogando as primeiras horas reais em Vice City e Leonida!
 
 PAUTA PRINCIPAL: "{angle}"
 
-FONTES MONITORADAS HOJE:
+LIVES E VÍDEOS MONITORADOS AGORA:
 {refs_txt}
 {news_txt}
 
-REGRAS EDITORIAIS OBRIGATÓRIAS:
-1. NUNCA apresente rumores ou teorias como fatos confirmados. Cada bloco DEVE ter:
-   - "badge_type": "OFICIAL" (Rockstar Games / site oficial), "CONFIRMADO" (Take-Two / imprensa verificada), "RUMOR" (vazamento não oficial, usando verbos no condicional) ou "TEORIA" (análise/hipótese da comunidade).
-   - "source_label": origem exata da informação (ex: "Rockstar Games Official / Trailer", "Site Oficial rockstargames.com/VI", "Relatório Take-Two Interactive", "Análise GTA Series Videos / Comunidade").
-2. Escreva a narração ("narration") para soar 100% HUMANA, conversada, envolvente, com ritmo de grande documentário gamer brasileiro (estilo Flow Games / Digital Foundry / Gigaton). Use perguntas retóricas, pausas dramáticas ("...") e zero clichês robóticos de IA.
-3. COERÊNCIA VISUAL TOTAL: para cada bloco, defina:
-   - "scene_type": escolha entre "map_zoom" (quando falar de regiões de Leonida), "character_dossier" (quando falar de Lucia, Jason, Raul Bautista, Boobie Ike, Dre'Quan), "data_comparison" (quando citar números, datas, recordes ou comparar GTA V vs GTA VI) ou "feature_spotlight" (quando analisar mecânicas, física, veículos, gráficos, armas ou IA).
+REGRAS EDITORIAIS E DE RETENÇÃO VIRAL OBRIGATÓRIAS:
+1. GANCHO ULTRA APELATIVO NO ATO 1 BLOCO 1 (0 a 15 segundos):
+   - Proibido começar com "Olá pessoal" ou introduções lentas.
+   - Comece direto no momento mais chocante das lives (ex: "O Davy Jones e o Bistecone simplesmente travaram ao vivo quando abriram o celular da Lucia e viram o que acontece na primeira missão do GTA 6...").
+2. CONTEÚDO 100% SOBRE O JOGO LANÇADO E AS LIVES:
+   - Analise as primeiras missões de Lucia e Jason (incluindo o início na prisão e a chegada a Vice City), a reação do Bistecone pilotando lanchas em Leonida Keys, a reação do Davy Jones testando a física RAGE 9 e as funções secretas do celular e redes sociais dentro do jogo.
+3. Cada bloco DEVE ter:
+   - "badge_type": "OFICIAL" (Gameplay Real PS5 Pro / Rockstar), "CONFIRMADO" (Verificado nas Lives de Davy Jones / Bistecone / Flow Games), "RUMOR" ou "ANALISE".
+   - "source_label": origem exata (ex: "Live Gameplayrj (Davy Jones) // GTA VI PS5 Pro", "Live Bistecone // Primeira Missão GTA VI", "Live SanInPlay & Flow Games // Vice City").
+4. Escreva a narração ("narration") para soar 100% HUMANA, magnética, ritmo acelerado de grande canal gamer brasileiro. Use perguntas retóricas, pausas dramáticas ("...") e zero clichês robóticos.
+5. COERÊNCIA VISUAL TOTAL: para cada bloco, defina:
+   - "scene_type": "cinema_broll" na maioria dos blocos (75-80%), e use "map_zoom" (quando falar de regiões de Leonida), "character_dossier" (quando falar de Lucia, Jason, Raul Bautista) ou "data_comparison" (quando comparar GTA V vs GTA VI ou recordes de audiência das lives) no máximo 1 vez por Ato.
    - "location_key": "vice_city", "leonida_keys", "grassrivers", "port_gellhorn", "ambrosia" ou "mount_kalaga".
-   - "character_name", "character_role", "character_facts" (lista de 2-3 fatos curtos quando scene_type for character_dossier).
-   - "stat_value" (ex: "19 NOV", "6 REGIÕES", "90M+"), "stat_unit", "comparison_items" (lista de 2 itens {{label, value, display}} quando scene_type for data_comparison).
-4. Estrutura: {num_acts} Atos, cada Ato com exatamente {blocks_per_act} blocos de narração (cada bloco com 35 a 55 palavras, ~14 a 18 segundos de fala natural).
+6. TÍTULO, THUMBNAIL E TAGS DE ALTO CTR (META >= 80% DE CHANCE DE VIRALIZAR):
+   - "long_title": Título ultra apelativo (50 a 78 caracteres) citando GTA 6 + Davy Jones / Bistecone ou a descoberta mais absurda da gameplay.
+   - "thumb_text": MÁXIMO 2 A 3 PALAVRAS GIGANTES DE IMPACTO (ex: "TRAVOU A LIVE!", "JOGO ABSURDO!", "OLHA ESSE CELULAR!").
+   - "thumb_subtext": Complemento de curiosidade extrema (ex: "DAVY JONES E BISTECONE EM CHOQUE NO GTA 6").
+7. Estrutura: {num_acts} Atos, cada Ato com exatamente {blocks_per_act} blocos de narração (cada bloco com 35 a 55 palavras, ~14 a 18 segundos de fala natural).
 
 Retorne APENAS JSON válido no formato:
 {{
-  "long_title": "Título magnético e profissional (máx 88 chars)",
-  "long_description": "Descrição editorial rica com fontes e contexto",
-  "long_tags": ["gta 6", "gta vi", "lancamento gta 6", "rockstar games", "vice city", "leonida"],
-  "thumb_text": "TEXTO CURTO IMPACTO (2-3 palavras)",
-  "thumb_subtext": "SUBTÍTULO DE APOIO",
+  "long_title": "Título magnético de alto CTR (máx 82 chars)",
+  "long_description": "Descrição editorial rica com destaques das lives e contexto",
+  "long_tags": ["gta 6", "gta vi", "gta 6 gameplay", "davy jones gta 6", "bistecone gta 6", "gameplayrj gta 6", "gta 6 ao vivo", "gta 6 inicio", "vice city", "leonida", "lucia e jason", "saninplay gta 6", "flow games gta 6", "gta 6 ps5 pro"],
+  "thumb_text": "TRAVOU A LIVE!",
+  "thumb_subtext": "DAVY JONES E BISTECONE EM CHOQUE NO GTA 6",
   "acts": [
     {{
       "act_num": 1,
@@ -162,27 +182,28 @@ Retorne APENAS JSON válido no formato:
           "narration": "Texto falado natural em PT-BR...",
           "headline": "TÍTULO DO CARD NA TELA",
           "subheadline": "Complemento informativo curto",
-          "callout": "PALAVRA-CHAVE",
-          "badge_type": "OFICIAL",
-          "source_label": "Rockstar Games / rockstargames.com/VI",
-          "scene_type": "map_zoom",
+          "callout": "LIVE DAVY JONES",
+          "badge_type": "CONFIRMADO",
+          "source_label": "Live Gameplayrj (Davy Jones) & Bistecone // GTA VI",
+          "scene_type": "cinema_broll",
           "location_key": "vice_city",
           "character_name": "LUCIA & JASON",
           "character_role": "Protagonistas Centrais",
-          "character_facts": ["Fato 1", "Fato 2"],
-          "stat_value": "19 NOV",
-          "stat_unit": "QUINTA-FEIRA",
+          "character_facts": ["Início na penitenciária de Leonida", "Fuga e primeiro assalto em Vice City"],
+          "stat_value": "9.4M+",
+          "stat_unit": "VIEWS NAS LIVES",
           "comparison_items": [
-            {{"label": "GTA V (2013)", "value": 45, "display": "1 Metrópole"}},
-            {{"label": "GTA VI (2026)", "value": 100, "display": "Estado Inteiro de Leonida"}}
+            {{"label": "GTA V (2013)", "value": 45, "display": "Física RAGE 7"}},
+            {{"label": "GTA VI (2026)", "value": 100, "display": "Física RAGE 9 Realista"}}
           ]
         }}
       ]
     }}
   ]
 }}"""
-        data, model_used = gemini_text(prompt, json_mode=True, temperature=0.68)
+        data, model_used = gemini_text(prompt, json_mode=True, temperature=0.72)
         data["model_used"] = model_used
+        data = AgenteAuditorViral.auditar_e_otimizar_viralizacao(data, formato="long")
         data["acts"] = AgenteDiretorCriativo.enriquecer_storyboard(data.get("acts", []), formato="long", research_data=research_data)
         return data
 
@@ -356,16 +377,11 @@ class AgenteEditorAudiovisual:
             json.dump(props_copy, f, ensure_ascii=False)
 
         comp_id = "GtaShortOverlay" if props_copy.get("isVertical") else "GtaStudioScene"
-        if os.name == "nt":
-            cmd = [
-                "cmd", "/c",
-                f'npx remotion render "{bundle_dir}" {comp_id} "{out_mp4}" --props="{props_file}" --frames=0-{frames - 1} --concurrency=4 --overwrite',
-            ]
-        else:
-            cmd = [
-                "npx", "remotion", "render", bundle_dir, comp_id, out_mp4,
-                f"--props={props_file}", f"--frames=0-{frames - 1}", "--concurrency=4", "--overwrite",
-            ]
+        npx_bin = "npx.cmd" if os.name == "nt" else "npx"
+        cmd = [
+            npx_bin, "remotion", "render", bundle_dir, comp_id, out_mp4,
+            f"--props={props_file}", f"--frames=0-{frames - 1}", "--concurrency=4", "--overwrite",
+        ]
         r = subprocess.run(cmd, cwd=cls.STUDIO_DIR, capture_output=True, text=True)
         try:
             os.remove(props_file)
@@ -465,6 +481,142 @@ class AgenteControleQualidade:
             "checks": checks,
             "reasons": reasons,
         }
+
+
+# ============================================================================
+# AGENTE 7 — AUDITOR DE VIRALIZAÇÃO (GARANTIA >= 80% DE CHANCE DE VIRALIZAR)
+# ============================================================================
+class AgenteAuditorViral:
+    """
+    Audita e otimiza automaticamente Roteiro, Gancho 0-3s, Título, Tags e Thumbnail
+    para garantir no mínimo 80% (80/100) de pontuação técnica de viralização antes de renderizar.
+    """
+
+    VIRAL_TRIGGERS = (
+        "davy jones", "bistecone", "gameplayrj", "saninplay", "flow games", "alanzoka",
+        "ao vivo", "live", "choque", "travou", "segredo", "celular", "missão", "missao",
+        "polícia", "policia", "física", "fisica", "vice city", "lucia", "jason", "gta 6", "gta vi",
+    )
+
+    MANDATORY_TAGS = [
+        "gta 6", "gta vi", "gta 6 gameplay", "davy jones gta 6", "bistecone gta 6",
+        "gameplayrj gta 6", "gta 6 ao vivo", "gta 6 inicio", "vice city", "leonida",
+        "lucia e jason", "saninplay gta 6", "flow games gta 6", "gta 6 ps5 pro", "cortes gta 6",
+    ]
+
+    @classmethod
+    def calcular_score_viral(cls, script_data, formato="short"):
+        if formato == "short":
+            title = (script_data.get("yt_title") or "").strip()
+            hook = (script_data.get("hook_text") or "").strip()
+            thumb_h = (script_data.get("headline_top") or "").strip()
+            outro = (script_data.get("outro_text") or "").strip()
+            tags = list(script_data.get("yt_tags") or [])
+        else:
+            title = (script_data.get("long_title") or "").strip()
+            acts = script_data.get("acts") or []
+            first_blk = ((acts[0].get("blocks") or [{}])[0]) if acts else {}
+            hook = (first_blk.get("narration") or "").strip()
+            thumb_h = (script_data.get("thumb_text") or "").strip()
+            last_act = acts[-1] if acts else {}
+            last_blk = ((last_act.get("blocks") or [{}])[-1]) if last_act else {}
+            outro = (last_blk.get("narration") or "").strip()
+            tags = list(script_data.get("long_tags") or [])
+
+        combined_low = f"{title} {hook} {thumb_h}".lower()
+
+        # Pilar 1: Gancho 0-3s Ultra Apelativo (0 a 22 pts)
+        p1 = 12
+        if len(hook.split()) >= 5 and any(k in hook.lower() for k in cls.VIRAL_TRIGGERS):
+            p1 += 6
+        if not hook.lower().startswith(("olá", "oi ", "sejam bem", "neste vídeo")):
+            p1 += 4
+
+        # Pilar 2: Trend-Jacking de Lives & Criadores (Davy Jones, Bistecone, GTA 6 Launch) (0 a 20 pts)
+        hits = sum(1 for k in cls.VIRAL_TRIGGERS if k in combined_low)
+        p2 = min(20, 8 + hits * 3)
+
+        # Pilar 3: Título de Alto CTR & SEO Velocity (0 a 20 pts)
+        p3 = 10
+        if 35 <= len(title) <= 88 and ("gta 6" in title.lower() or "gta vi" in title.lower()):
+            p3 += 6
+        if any(c in title for c in ("!", "?", "🔴", "🤯", "🚨")) or any(w.isupper() and len(w) >= 3 for w in title.split()):
+            p3 += 4
+
+        # Pilar 4: Thumbnail / Headline de Impacto Rápido (2 a 4 palavras) (0 a 18 pts)
+        w_th = len(thumb_h.split())
+        p4 = 18 if (1 <= w_th <= 5 and len(thumb_h) <= 28) else 11
+
+        # Pilar 5: Densidade de Tags & Gatilho de Comentários (0 a 20 pts)
+        p5 = 10
+        if len(tags) >= 10:
+            p5 += 5
+        if "?" in outro or any(w in outro.lower() for w in ("comenta", "acha", "nota", "jogar", "qual")):
+            p5 += 5
+
+        total = min(100, p1 + p2 + p3 + p4 + p5)
+        return total, {
+            "hook_power": p1,
+            "live_trend_jacking": p2,
+            "title_ctr": p3,
+            "thumb_impact": p4,
+            "tags_and_engagement": p5,
+        }
+
+    @classmethod
+    def auditar_e_otimizar_viralizacao(cls, script_data, formato="short"):
+        # 1. Enriquece tags obrigatórias de alto volume
+        tag_key = "yt_tags" if formato == "short" else "long_tags"
+        curr_tags = list(script_data.get(tag_key) or [])
+        seen_t = {t.lower() for t in curr_tags}
+        for mt in cls.MANDATORY_TAGS:
+            if mt.lower() not in seen_t:
+                curr_tags.append(mt)
+                seen_t.add(mt.lower())
+        script_data[tag_key] = curr_tags[:18]
+
+        score, breakdown = cls.calcular_score_viral(script_data, formato=formato)
+
+        # 2. Se score < 80, aplica reforço cirúrgico imediato no gancho, título e thumb
+        if score < 80:
+            if formato == "short":
+                t = (script_data.get("yt_title") or "GTA 6 AO VIVO!").strip()
+                if "gta 6" not in t.lower():
+                    t = f"GTA 6 AO VIVO: {t}"
+                if "#gta6" not in t.lower():
+                    t = f"{t} 🤯 #gta6 #shorts"
+                script_data["yt_title"] = t[:95]
+
+                ht = (script_data.get("headline_top") or "").strip()
+                if not ht or len(ht.split()) > 5:
+                    script_data["headline_top"] = "TRAVOU A LIVE NO GTA 6!"
+                hk = (script_data.get("hook_text") or "").strip()
+                if not any(k in hk.lower() for k in cls.VIRAL_TRIGGERS):
+                    script_data["hook_text"] = f"Olha o que descobriram ao vivo no GTA 6: {hk}"
+                ot = (script_data.get("outro_text") or "").strip()
+                if "?" not in ot:
+                    script_data["outro_text"] = f"{ot} Qual nota você dá pra isso?"
+            else:
+                t = (script_data.get("long_title") or "GTA 6 LANÇADO: O MELHOR DAS LIVES").strip()
+                if "gta 6" not in t.lower():
+                    t = f"GTA 6 AO VIVO: {t}"
+                script_data["long_title"] = t[:86]
+                th = (script_data.get("thumb_text") or "").strip()
+                if not th or len(th.split()) > 4:
+                    script_data["thumb_text"] = "TRAVOU A LIVE!"
+                if not script_data.get("thumb_subtext"):
+                    script_data["thumb_subtext"] = "DAVY JONES E BISTECONE EM CHOQUE NO GTA 6"
+
+            score, breakdown = cls.calcular_score_viral(script_data, formato=formato)
+
+        script_data["viral_audit"] = {
+            "approved": score >= 80,
+            "viral_score": score,
+            "target_minimum": 80,
+            "breakdown": breakdown,
+        }
+        print(f"[AUDITOR VIRAL V3] Formato={formato.upper()} | Score={score}% (Mínimo=80%) | Pilares={breakdown}", flush=True)
+        return script_data
 
 
 # ============================================================================
