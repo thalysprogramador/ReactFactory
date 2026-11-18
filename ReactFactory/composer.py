@@ -21,15 +21,35 @@ _POWER_WORDS = {
 }
 
 
-def load_font(size):
-    if size in _FONT_CACHE:
-        return _FONT_CACHE[size]
+def load_font(size, style="poppins"):
+    key = (size, style)
+    if key in _FONT_CACHE:
+        return _FONT_CACHE[key]
     from PIL import ImageFont
 
-    candidates = [
+    fonts_dir = os.path.join(ASSETS_DIR, "fonts")
+    if style == "anton":
+        preferred = [
+            os.path.join(fonts_dir, "Anton-Regular.ttf"),
+            os.path.join(fonts_dir, "BebasNeue-Regular.ttf"),
+            os.path.join(fonts_dir, "Poppins-Black.ttf"),
+        ]
+    elif style == "bebas":
+        preferred = [
+            os.path.join(fonts_dir, "BebasNeue-Regular.ttf"),
+            os.path.join(fonts_dir, "Anton-Regular.ttf"),
+            os.path.join(fonts_dir, "Poppins-Black.ttf"),
+        ]
+    else:
+        preferred = [
+            os.path.join(fonts_dir, "Poppins-Black.ttf"),
+            os.path.join(fonts_dir, "Poppins-ExtraBold.ttf"),
+            os.path.join(fonts_dir, "Anton-Regular.ttf"),
+        ]
+
+    candidates = preferred + [
         "C:/Windows/Fonts/arialbd.ttf",
         "C:/Windows/Fonts/impact.ttf",
-        "C:/Windows/Fonts/segoeuib.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
     ]
@@ -37,12 +57,12 @@ def load_font(size):
         if os.path.exists(p):
             try:
                 f = ImageFont.truetype(p, size)
-                _FONT_CACHE[size] = f
+                _FONT_CACHE[key] = f
                 return f
             except Exception:
                 pass
     f = ImageFont.load_default()
-    _FONT_CACHE[size] = f
+    _FONT_CACHE[key] = f
     return f
 
 
@@ -68,13 +88,12 @@ def _clean_text(t):
     return "".join(c for c in (t or "") if ord(c) < 65000).strip()
 
 
-def draw_caption_chunk(frame_bgr, text, highlight_idx=0, y_center=1315):
+def draw_caption_chunk(frame_bgr, text, highlight_idx=0, y_center=1415):
     """
-    Legenda Viral Profissional V3 (Inspirada na referência YouTube Shorts hz4KLLc4Q6Q):
-    - ZERO caixa preta ou retângulo neon atrás do texto (100% do vídeo visível!).
-    - 1 a 2 palavras gigantes por vez (fonte 86px ExtraBold) no centro/terço inferior.
-    - Contorno preto espesso (stroke_width=10) + sombra projetada profunda (+7px Y).
-    - Destaque dinâmico em Amarelo Elétrico (#FFE600) na palavra ativa e Ciano (#00F0FF) em gatilhos.
+    Legenda Viral Profissional V4 (Poppins-Black ExtraBold — Estilo Referência hz4KLLc4Q6Q + CapCut Pro):
+    - ZERO caixa preta ou retângulo neon atrás do texto.
+    - 1 a 2 palavras gigantes por vez (fonte Poppins-Black 86px) com contorno suave + sombra projetada profunda.
+    - Destaque dinâmico em Ouro Elétrico (#FFE01B) na palavra ativa e Ciano (#00F5FF) em gatilhos.
     """
     words = _clean_text(text).upper().split()
     if not words:
@@ -82,9 +101,8 @@ def draw_caption_chunk(frame_bgr, text, highlight_idx=0, y_center=1315):
 
     img_pil = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil, "RGBA")
-    font = load_font(84 if len(" ".join(words)) <= 14 else 72)
+    font = load_font(86 if len(" ".join(words)) <= 13 else 74, style="poppins")
 
-    # Agrupa em no máximo 2 palavras por linha (idealmente 1 linha de 1-2 palavras como hz4KLLc4Q6Q)
     lines = []
     curr = []
     for idx, w in enumerate(words[:3]):
@@ -106,41 +124,40 @@ def draw_caption_chunk(frame_bgr, text, highlight_idx=0, y_center=1315):
         for word_str, is_active in line:
             clean_tok = word_str.strip(".,!?\"'")
             if is_active:
-                color = (0, 240, 255, 255) if clean_tok in _POWER_WORDS else (255, 230, 0, 255)
+                color = (0, 245, 255, 255) if clean_tok in _POWER_WORDS else (255, 224, 27, 255)
             else:
-                color = (255, 230, 0, 255) if clean_tok in _POWER_WORDS else (255, 255, 255, 255)
+                color = (255, 224, 27, 255) if clean_tok in _POWER_WORDS else (255, 255, 255, 255)
 
-            # Sombra projetada profunda para leitura instantânea sobre qualquer gameplay
+            # Sombra projetada suave em 2 camadas para efeito cinema 3D
             draw.text(
-                (x_cursor + 4, y_cursor + 7),
+                (x_cursor + 3, y_cursor + 9),
                 word_str,
                 font=font,
-                fill=(0, 0, 0, 230),
-                stroke_width=10,
-                stroke_fill=(0, 0, 0, 230),
+                fill=(0, 0, 0, 195),
+                stroke_width=11,
+                stroke_fill=(0, 0, 0, 195),
             )
-            # Palavra principal com contorno preto pesado
             draw.text(
                 (x_cursor, y_cursor),
                 word_str,
                 font=font,
                 fill=color,
-                stroke_width=9,
-                stroke_fill=(0, 0, 0, 255),
+                stroke_width=8,
+                stroke_fill=(8, 10, 16, 255),
             )
             w_bbox = draw.textbbox((0, 0), word_str + " ", font=font)
             x_cursor += w_bbox[2] - w_bbox[0]
 
-        y_cursor += 92
+        y_cursor += 96
 
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
-def draw_top_headline(frame_bgr, headline_text, progress_0_1=0.0, source_badge="AO VIVO // CORTES GTA 6"):
+def draw_top_headline(frame_bgr, headline_text, progress_0_1=0.0, source_badge="AO VIVO • CORTES GTA 6"):
     """
-    Gancho Superior Viral V3 para Shorts (Full-Screen 1080x1920):
-    - Badge '🔴 AO VIVO // CORTES GTA 6' discreto no topo (y=138).
-    - Título gancho grande em 1 ou 2 linhas com contorno preto espesso e palavra-chave em Amarelo (#FFE600).
+    Gancho Superior Cinema V4 (Fonte Anton Display Condensada):
+    - Tipografia condensada estilo cinema/documentário com impacto imediato nos primeiros 0.5s.
+    - Badge minimalista translúcido no topo + barra de retenção dourada ultra-fina.
     """
     clean_h = _clean_text(headline_text).upper()
     if not clean_h:
@@ -149,93 +166,99 @@ def draw_top_headline(frame_bgr, headline_text, progress_0_1=0.0, source_badge="
     img_pil = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil, "RGBA")
 
-    # 1. Pill '🔴 AO VIVO // CORTES GTA 6'
-    f_badge = load_font(26)
+    # 1. Pill minimalista '● AO VIVO • CORTES GTA 6'
+    f_badge = load_font(22, style="poppins")
     tb = draw.textbbox((0, 0), source_badge, font=f_badge)
-    bw = (tb[2] - tb[0]) + 54
+    bw = (tb[2] - tb[0]) + 56
     bx0 = (1080 - bw) // 2
-    by0 = 132
+    by0 = 112
     draw.rounded_rectangle(
-        [bx0, by0, bx0 + bw, by0 + 44],
-        radius=22,
-        fill=(10, 12, 18, 225),
-        outline=(255, 255, 255, 65),
-        width=2,
+        [bx0, by0, bx0 + bw, by0 + 42],
+        radius=21,
+        fill=(10, 13, 22, 215),
+        outline=(255, 255, 255, 55),
+        width=1,
     )
-    draw.ellipse([bx0 + 16, by0 + 14, bx0 + 32, by0 + 30], fill=(255, 45, 45, 255))
-    draw.text((bx0 + 40, by0 + 8), source_badge, font=f_badge, fill=(248, 250, 252, 255))
+    draw.ellipse([bx0 + 16, by0 + 14, bx0 + 30, by0 + 28], fill=(239, 68, 68, 255))
+    draw.text((bx0 + 40, by0 + 7), source_badge, font=f_badge, fill=(248, 250, 252, 245))
 
-    # 2. Gancho apelativo completo em 1 ou 2 linhas (nunca trunca palavras finais!)
+    # 2. Manchete Cinema em Anton (1 ou 2 linhas equilibradas, nunca trunca palavras!)
     words = clean_h.split()
     if len(words) <= 4 and len(clean_h) <= 22:
         lines = [clean_h]
     else:
-        mid = max(1, len(words) // 2)
-        # Equilibra o comprimento entre linha 1 e linha 2
-        best_mid = mid
+        best_mid = max(1, len(words) // 2)
         best_diff = 999
         for m in range(1, len(words)):
-            l1 = " ".join(words[:m])
-            l2 = " ".join(words[m:])
-            diff = abs(len(l1) - len(l2))
+            diff = abs(len(" ".join(words[:m])) - len(" ".join(words[m:])))
             if diff < best_diff:
                 best_diff = diff
                 best_mid = m
         lines = [" ".join(words[:best_mid]), " ".join(words[best_mid:])]
 
     max_line_chars = max(len(ln) for ln in lines)
-    f_size = 54 if max_line_chars <= 20 else (46 if max_line_chars <= 26 else 40)
-    f_head = load_font(f_size)
-    yy = 235 if len(lines) == 1 else 210
+    f_size = 72 if max_line_chars <= 22 else (62 if max_line_chars <= 28 else 54)
+    f_head = load_font(f_size, style="anton")
+    yy = 192 if len(lines) == 1 else 168
     for idx_l, ln in enumerate(lines):
         lb = draw.textbbox((0, 0), ln, font=f_head)
         lw = lb[2] - lb[0]
         lx = (1080 - lw) // 2
-        col = (255, 230, 0, 255) if idx_l == len(lines) - 1 else (255, 255, 255, 255)
-        draw.text((lx + 3, yy + 5), ln, font=f_head, fill=(0, 0, 0, 230), stroke_width=8, stroke_fill=(0, 0, 0, 230))
-        draw.text((lx, yy), ln, font=f_head, fill=col, stroke_width=7, stroke_fill=(0, 0, 0, 255))
-        yy += int(f_size * 1.25)
+        col = (255, 224, 27, 255) if idx_l == len(lines) - 1 else (255, 255, 255, 255)
+        draw.text((lx + 3, yy + 7), ln, font=f_head, fill=(0, 0, 0, 210), stroke_width=9, stroke_fill=(0, 0, 0, 210))
+        draw.text((lx, yy), ln, font=f_head, fill=col, stroke_width=6, stroke_fill=(8, 10, 16, 255))
+        yy += int(f_size * 1.12)
 
-    # 3. Barra de retenção minimalista no topo extremo (4px)
     if progress_0_1 > 0:
         pw = int(1080 * min(1.0, max(0.0, progress_0_1)))
-        draw.rectangle([0, 0, pw, 5], fill=(255, 210, 0, 240))
+        draw.rectangle([0, 0, pw, 5], fill=(255, 190, 11, 240))
 
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
 def fit_widescreen_cinematic(frame, target_w=1080, target_h=1920, zoom=1.02, pan_x=0.0):
     """
-    Enquadramento Cinematográfico V3 para Shorts (SEM ULTRA-ZOOM e SEM AVATAR):
-    - Quando o vídeo fonte é 16:9 (lives do Davy Jones, Bistecone, SanInPlay ou gameplay GTA 6):
-      1. Cria fundo vertical 1080x1920 com reflexo ambiente desfocado e escurecido (24% brilho).
-      2. Posiciona uma janela Cinema Showcase grande (1080x920 em y=365..1285 quando target_h=1920,
-         ou 1080x760 em y=195..955 quando target_h=1230), preservando ~85% da largura original 16:9!
-      3. Assim dá para assistir perfeitamente à gameplay completa + webcam do streamer sem cortar nada!
+    Enquadramento Cinema Vertical V4 para Shorts (SEM ULTRA-ZOOM, SEM AVATAR E SEM VAZIO PRETO):
+    - Fundo ambiente rico com blur suave + gradiente cinema (mantém cor e atmosfera de Vice City no topo/base).
+    - Janela principal grande (1080x880 em y=360..1240 quando target_h=1920) com fusão suave (feather gradient)
+      nas bordas superior e inferior — sem linha amarela dura de PowerPoint!
+    - Preserva ~86% da largura horizontal 16:9 (mostra toda a gameplay e reação do streamer com conforto visual).
     """
     h, w = frame.shape[:2]
     if w <= h * 1.05:
         return crop_resize(frame, target_w, target_h, zoom=min(1.03, zoom), pan_x=pan_x)
 
+    # 1. Fundo ambiente rico em cor e profundidade (42% de luminosidade + vinheta suave no topo/base)
     bg_small = cv2.resize(frame, (180, 320), interpolation=cv2.INTER_AREA)
-    bg_blur = cv2.GaussianBlur(bg_small, (25, 25), 0)
-    bg = (cv2.resize(bg_blur, (target_w, target_h), interpolation=cv2.INTER_LINEAR).astype(np.float32) * 0.24).astype(np.uint8)
+    bg_blur = cv2.GaussianBlur(bg_small, (31, 31), 0)
+    bg = cv2.resize(bg_blur, (target_w, target_h), interpolation=cv2.INTER_LINEAR).astype(np.float32) * 0.42
+    # Vinheta vertical elegante para destacar manchete no topo e legenda na base
+    v_grad = np.ones((target_h, 1, 1), dtype=np.float32)
+    v_grad[:340] = np.linspace(0.32, 0.85, 340, dtype=np.float32)[:, None, None]
+    v_grad[target_h - 460 :] = np.linspace(0.85, 0.28, 460, dtype=np.float32)[:, None, None]
+    bg = np.clip(bg * v_grad, 0, 255).astype(np.uint8)
 
     if target_h >= 1600:
-        # Full-screen Short (1080x1920 sem avatar): janela widescreen panorâmica 1080x700 em y=440..1140
-        # Preserva >91% da largura 16:9 original (mostra a gameplay inteira + webcam completa do streamer!)
-        win_h = 700
-        y0 = 440
+        win_h = 840
+        y0 = 370
     else:
         win_h = 680
         y0 = 215
 
+    # 2. Janela principal 16:9 expandida suavemente (sem ultra-zoom) com color grading cinema
     fg = crop_resize(frame, target_w, win_h, zoom=min(1.03, zoom), pan_x=pan_x)
-    bg[y0 : y0 + win_h, :] = fg
+    fg_f = fg.astype(np.float32)
+    fg_f = np.clip((fg_f - 124.0) * 1.06 + 124.0, 0, 255)
 
-    # Moldura especular sutil no topo e base do quadro cinematográfico
-    cv2.line(bg, (0, y0), (target_w, y0), (40, 185, 255), 2)
-    cv2.line(bg, (0, y0 + win_h - 1), (target_w, y0 + win_h - 1), (40, 185, 255), 2)
+    # Feather suave de 36px nas bordas superior e inferior da janela (integração orgânica estilo cinema!)
+    alpha = np.ones((win_h, 1, 1), dtype=np.float32)
+    feather = 36
+    alpha[:feather] = np.linspace(0.0, 1.0, feather, dtype=np.float32)[:, None, None]
+    alpha[-feather:] = np.linspace(1.0, 0.0, feather, dtype=np.float32)[:, None, None]
+
+    roi = bg[y0 : y0 + win_h, :].astype(np.float32)
+    blended = fg_f * alpha + roi * (1.0 - alpha)
+    bg[y0 : y0 + win_h, :] = np.clip(blended, 0, 255).astype(np.uint8)
     return bg
 
 
