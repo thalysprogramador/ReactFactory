@@ -1,10 +1,14 @@
-"""Catálogo Semântico de B-Rolls em Vídeo 1080p (Gameplay/Trailers + Influenciadores) e Imagens 4K.
+"""Catálogo Semântico de B-Rolls em Vídeo 1080p (Lives de Streamers + Gameplay GTA 6 + Trailers) e Imagens 4K.
 
 Garante que 100% dos blocos de Vídeos Longos e Shorts usem VÍDEOS REAIS EM MOVIMENTO
-semanticamente conectados ao que o narrador está falando em cada frase.
+semanticamente conectados ao que o narrador está falando em cada frase, incluindo cortes
+atualizados diariamente das lives e vídeos de Davy Jones (Gameplayrj), Bistecone, SanInPlay,
+Flow Games, Alanzoka, BRKsEDU, Gigaton Games e gameplay oficial de GTA 6.
 """
 import glob
+import json
 import os
+import random
 import subprocess
 import sys
 import cv2
@@ -15,25 +19,49 @@ VAULT_DIR = os.path.join(BASE_DIR, "temp_gta6", "vault")
 CLIPS_CURATED_DIR = os.path.join(BASE_DIR, "assets", "gta6_clips")
 INFLUENCER_CLIPS_DIR = os.path.join(BASE_DIR, "temp_gta6", "influencer_clips")
 
-# Mapeamento visual verificado quadro-a-quadro dos 17 clipes 1080p em assets/gta6_clips/
+# Mapeamento visual verificado quadro-a-quadro dos clipes 1080p em assets/gta6_clips/ (Gameplay + Lives)
 VIDEO_SEMANTIC_MAP = {
+    "gta6_live_davyjones_01.mp4": {
+        "tags": ["davy_jones", "gameplayrj", "live", "inicio", "gameplay", "reacao", "streamers", "lancamento", "vice_city"],
+        "desc": "Davy Jones (Gameplayrj) ao vivo no início da gameplay de GTA 6",
+    },
+    "gta6_live_davyjones_02.mp4": {
+        "tags": ["davy_jones", "gameplayrj", "live", "vice_city", "mundo_aberto", "exploracao", "carros", "streamers", "gameplay"],
+        "desc": "Davy Jones explorando Vice City ao vivo no GTA 6",
+    },
+    "gta6_live_bistecone_01.mp4": {
+        "tags": ["bistecone", "live", "missao", "historia", "lucia", "jason", "acao", "streamers", "gameplay", "reacao"],
+        "desc": "Bistecone jogando a primeira missão de GTA 6 ao vivo",
+    },
+    "gta6_live_bistecone_02.mp4": {
+        "tags": ["bistecone", "live", "graficos", "fisica", "detalhes", "choque", "reacao", "streamers", "gameplay"],
+        "desc": "Bistecone em choque reagindo aos gráficos e física do GTA 6",
+    },
+    "gta6_live_saninplay_01.mp4": {
+        "tags": ["saninplay", "live", "praia", "vice_city", "oceano", "agua", "npc", "mundo_aberto", "gameplay", "streamers"],
+        "desc": "SanInPlay explorando a praia de Vice City e o oceano no GTA 6",
+    },
+    "gta6_live_flowgames_01.mp4": {
+        "tags": ["flow_games", "live", "analise", "review", "gameplay", "graficos", "ps5", "lancamento", "streamers"],
+        "desc": "Flow Games analisando as primeiras horas de gameplay do GTA 6",
+    },
     "gta6_vid_00.mp4": {"tags": ["personagens", "leonida", "rua", "historia", "npc", "cutscene"], "desc": "Personagem caminhando em rua de Leonida"},
     "gta6_vid_01.mp4": {"tags": ["motos", "veiculos", "offroad", "mount_kalaga", "grassrivers", "mapa", "acao"], "desc": "Moto motocross saltando nas trilhas de Mount Kalaga"},
     "gta6_vid_02.mp4": {"tags": ["carros", "vice_city", "noite", "direcao", "estrada", "iluminacao", "conversivel"], "desc": "Conversível dirigindo à noite nas avenidas neon de Vice City"},
     "gta6_vid_03.mp4": {"tags": ["carros", "velocidade", "corrida", "vice_city", "noite", "fisica", "veiculos"], "desc": "Corrida de carros esportivos em alta velocidade em Vice City"},
     "gta6_vid_04.mp4": {"tags": ["fisica", "acidente", "carros", "explosao", "rage9", "acao", "policia", "destruicao"], "desc": "Acidente cinematográfico com carro capotando e faíscas na física RAGE 9"},
-    "gta6_vid_05.mp4": {"tags": ["vice_city", "praia", "npc", "redes_sociais", "influenciadores", "vida_real", "mundo_aberto"], "desc": "Influenciadores e NPCs gravando manobras na praia de Vice Beach"},
+    "gta6_vid_05.mp4": {"tags": ["vice_city", "praia", "npc", "redes_sociais", "influenciadores", "vida_real", "mundo_aberto", "celular"], "desc": "Influenciadores e NPCs gravando manobras no celular na praia de Vice Beach"},
     "gta6_vid_06.mp4": {"tags": ["personagens", "historia", "graficos", "rosto", "expressao", "cutscene", "dialogo"], "desc": "Cutscene ultra-realista de personagem em Leonida"},
     "gta6_vid_07.mp4": {"tags": ["barcos", "iate", "agua", "oceano", "leonida_keys", "mapa", "fisica"], "desc": "Iate cortando as ondas em alta velocidade em Leonida Keys"},
     "gta6_vid_08.mp4": {"tags": ["personagens", "npc", "cal", "humor", "leonida", "historia"], "desc": "Personagem reagindo em cena de história em Leonida"},
     "gta6_vid_09.mp4": {"tags": ["lucia", "noite", "clube", "festa", "musica", "vice_city", "iluminacao"], "desc": "Lucia dançando sob luzes volumétricas em clube noturno de Vice City"},
-    "gta6_vid_10.mp4": {"tags": ["lancamento", "19_de_novembro", "nova_zelandia", "rockstar", "ps5", "xbox", "data"], "desc": "Revelação oficial do lançamento em 19 de novembro"},
-    "gta6_vid_12.mp4": {"tags": ["lucia", "jason", "protagonistas", "assalto", "crime", "armas", "casal", "historia"], "desc": "Lucia e Jason colocando bandanas antes de assalto"},
+    "gta6_vid_10.mp4": {"tags": ["lancamento", "19_de_novembro", "nova_zelandia", "rockstar", "ps5", "xbox", "data"], "desc": "Revelação oficial do lançamento de GTA 6"},
+    "gta6_vid_12.mp4": {"tags": ["lucia", "jason", "protagonistas", "assalto", "crime", "armas", "casal", "historia", "missao"], "desc": "Lucia e Jason colocando bandanas antes de assalto"},
     "gta6_vid_17.mp4": {"tags": ["agua", "oceano", "vida_marinha", "graficos", "leonida_keys", "natureza", "mergulho"], "desc": "Fundo do mar cristalino e recife em Leonida Keys"},
-    "gta6_vid_18.mp4": {"tags": ["vice_city", "rua", "npc", "cotidiano", "mundo_aberto", "detalhes"], "desc": "Interação urbana e entregador nas ruas de Vice City"},
+    "gta6_vid_18.mp4": {"tags": ["vice_city", "rua", "npc", "cotidiano", "mundo_aberto", "detalhes", "celular"], "desc": "Interação urbana e entregador nas ruas de Vice City"},
     "gta6_vid_19.mp4": {"tags": ["personagens", "dialogo", "graficos", "iluminacao", "rage9", "rosto"], "desc": "Close-up cinematográfico mostrando detalhes de pele e iluminação"},
     "gta6_vid_20.mp4": {"tags": ["barcos", "agua", "leonida_keys", "luxo", "oceano", "veiculos"], "desc": "Detalhes do iate navegando pelas águas de Leonida"},
-    "gta6_vid_28.mp4": {"tags": ["lancamento", "19_de_novembro", "nova_zelandia", "quinta_feira", "pre_load", "rockstar"], "desc": "Tela oficial Grand Theft Auto VI — 19 de Novembro de 2026"},
+    "gta6_vid_28.mp4": {"tags": ["lancamento", "19_de_novembro", "nova_zelandia", "quinta_feira", "pre_load", "rockstar"], "desc": "Tela oficial Grand Theft Auto VI"},
 }
 
 IMAGE_SEMANTIC_MAP = {
@@ -60,6 +88,15 @@ IMAGE_SEMANTIC_MAP = {
     "img_27.jpg": {"tags": ["carros", "offroad", "grassrivers", "mount_kalaga", "veiculos"], "subject": "Detalhe frontal do 4x4 Canis"},
     "img_29.jpg": {"tags": ["personagens", "bae_luxe", "roxy", "vice_city", "cultura", "npcs", "lojas"], "subject": "Personagem em loja urbana de Vice City"},
 }
+
+LIVE_CREATOR_QUERIES = [
+    "ytsearch3:Davy Jones Gameplayrj GTA 6 gameplay",
+    "ytsearch3:Bistecone GTA 6 gameplay",
+    "ytsearch2:SanInPlay GTA 6 gameplay",
+    "ytsearch2:Flow Games GTA 6 gameplay",
+    "ytsearch2:Alanzoka GTA 6 gameplay",
+    "ytsearch2:MaxMRM GTA 6 gameplay",
+]
 
 
 def is_sticker_mask_video(mp4_path):
@@ -88,25 +125,81 @@ def is_sticker_mask_video(mp4_path):
         return True
 
 
-def harvest_live_influencer_clips(research_data, ffmpeg_exe, max_new=4):
+def discover_live_creator_videos(max_per_query=2):
     """
-    Baixa trechos reais em vídeo (720p/1080p) dos vídeos mais recentes de canais de GTA 6
-    e influenciadores (Flow Games, SanInPlay, Gigaton, BRKsEDU, Gameplayrj, TGG, IGN)
-    usando o seletor DASH bv* para alimentar os B-rolls do dia (incluindo lançamento na Nova Zelândia).
+    Busca em tempo real no YouTube as lives e vídeos de gameplay de GTA 6 recém-lançados
+    por Davy Jones (Gameplayrj), Bistecone, SanInPlay, Flow Games, Alanzoka e MaxMRM.
+    """
+    discovered = []
+    seen_ids = set()
+    queries = list(LIVE_CREATOR_QUERIES)
+    random.shuffle(queries)
+    for q in queries[:4]:
+        try:
+            r = subprocess.run(
+                [sys.executable, "-m", "yt_dlp", "--flat-playlist", "--dump-json", q],
+                capture_output=True,
+                text=True,
+                timeout=18,
+                check=False,
+            )
+            count = 0
+            for line in r.stdout.splitlines():
+                if count >= max_per_query:
+                    break
+                try:
+                    d = json.loads(line)
+                    vid = d.get("id") or ""
+                    title = d.get("title") or ""
+                    ch = d.get("uploader") or d.get("channel") or "Streamer"
+                    dur = d.get("duration") or 600
+                    views = int(d.get("view_count") or 50000)
+                    if vid and vid not in seen_ids and any(k in title.lower() for k in ("gta", "vice", "leonida")):
+                        seen_ids.add(vid)
+                        discovered.append({
+                            "id": vid,
+                            "channel": ch,
+                            "title": title,
+                            "duration": dur,
+                            "views": views,
+                        })
+                        count += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return discovered
+
+
+def harvest_live_influencer_clips(research_data, ffmpeg_exe, max_new=6):
+    """
+    Baixa trechos reais em vídeo (720p/1080p) das lives e gameplays mais recentes de
+    Davy Jones (Gameplayrj), Bistecone, SanInPlay, Flow Games, Alanzoka, BRKsEDU e Gigaton
+    usando o seletor DASH bv* em janelas de ação variadas para alimentar Shorts e Longos todos os dias.
     """
     os.makedirs(INFLUENCER_CLIPS_DIR, exist_ok=True)
-    refs = (research_data or {}).get("top_references") or []
-    harvested = []
+    refs = list((research_data or {}).get("top_references") or [])
+    live_discovered = discover_live_creator_videos(max_per_query=2)
+    all_candidates = live_discovered + refs
 
-    for r in refs:
+    harvested = []
+    time_windows = [("*140-146", "a"), ("*320-326", "b"), ("*540-546", "c"), ("*85-91", "d")]
+
+    for idx, r in enumerate(all_candidates):
         if len(harvested) >= max_new:
             break
         vid = r.get("id") or ""
-        ch = (r.get("channel") or "Creator").replace(" ", "_")[:14]
+        ch = (r.get("channel") or "Creator").replace(" ", "_")[:16]
         title = (r.get("title") or "").lower()
+        dur = int(r.get("duration") or 600)
         if not vid or ch.startswith("Rockstar"):
             continue
-        dst = os.path.join(INFLUENCER_CLIPS_DIR, f"inf_{vid}.mp4")
+
+        sec_range, suffix = time_windows[idx % len(time_windows)]
+        if dur and dur < 160:
+            sec_range, suffix = "*22-28", "s"
+
+        dst = os.path.join(INFLUENCER_CLIPS_DIR, f"inf_{vid}_{suffix}.mp4")
         if os.path.exists(dst) and os.path.getsize(dst) > 100_000 and not is_sticker_mask_video(dst):
             harvested.append({"path": dst, "title": title, "channel": ch})
             continue
@@ -115,18 +208,18 @@ def harvest_live_influencer_clips(research_data, ffmpeg_exe, max_new=4):
             cmd = [
                 sys.executable, "-m", "yt_dlp", "--ffmpeg-location", ffmpeg_exe,
                 "-f", "bv*[height<=720][vcodec^=avc1]/bv*[height<=720]/b",
-                "--download-sections", "*32-37",
+                "--download-sections", sec_range,
                 "--merge-output-format", "mp4",
                 "-o", raw_dst,
                 f"https://www.youtube.com/watch?v={vid}",
             ]
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=35, check=False)
-            if os.path.exists(raw_dst) and os.path.getsize(raw_dst) > 80_000:
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=38, check=False)
+            if os.path.exists(raw_dst) and os.path.getsize(raw_dst) > 70_000:
                 subprocess.run(
                     [
                         ffmpeg_exe, "-y", "-i", raw_dst,
                         "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=24,setsar=1",
-                        "-c:v", "libx264", "-preset", "fast", "-crf", "21", "-pix_fmt", "yuv420p", "-an",
+                        "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-an",
                         dst,
                     ],
                     stdout=subprocess.DEVNULL,
@@ -147,7 +240,7 @@ def harvest_live_influencer_clips(research_data, ffmpeg_exe, max_new=4):
 
 
 def extract_real_trailer_clips(ffmpeg_exe):
-    """Retorna todos os clipes 1080p curados em assets/gta6_clips + clipes de influenciadores."""
+    """Retorna todos os clipes 1080p curados (Lives Davy Jones/Bistecone + Gameplay GTA 6) + colheita diária."""
     curated = [
         os.path.join(CLIPS_CURATED_DIR, fn)
         for fn in sorted(VIDEO_SEMANTIC_MAP.keys())
@@ -164,17 +257,19 @@ def _score_text_against_tags(text_low, tags):
         if t_clean in text_low or t in text_low:
             score += 4
     keyword_boosts = [
+        (["davy jones", "gameplayrj", "davy", "mago"], ["davy_jones", "gameplayrj", "live", "streamers"]),
+        (["bistecone", "live", "streamer", "ao vivo", "reação", "choque"], ["bistecone", "live", "streamers", "reacao"]),
+        (["saninplay", "flow games", "alanzoka", "influenciador"], ["saninplay", "flow_games", "influenciadores", "streamers"]),
+        (["celular", "aplicativo", "redes sociais", "tik tok", "foto"], ["celular", "redes_sociais", "influenciadores", "npc"]),
         (["mapa", "vice city", "leonida", "região", "estado", "cidade"], ["mapa", "vice_city", "leonida_keys", "mount_kalaga"]),
-        (["lucia", "jason", "casal", "protagonista", "assalto", "crime", "prisão"], ["lucia", "jason", "protagonistas", "assalto"]),
+        (["lucia", "jason", "casal", "protagonista", "assalto", "crime", "missão"], ["lucia", "jason", "protagonistas", "assalto", "missao"]),
         (["carro", "veículo", "física", "dirigir", "corrida", "velocidade", "moto", "batida"], ["carros", "veiculos", "fisica", "motos", "acidente"]),
-        (["água", "oceano", "barco", "iate", "praia", "mar", "keys"], ["agua", "barcos", "oceano", "leonida_keys"]),
+        (["água", "oceano", "barco", "iate", "praia", "mar", "keys"], ["agua", "barcos", "oceano", "leonida_keys", "praia"]),
         (["noite", "clube", "festa", "música", "neon"], ["noite", "clube", "musica"]),
-        (["npc", "inteligência artificial", "ia", "redes sociais", "influenciador", "realismo"], ["npc", "influenciadores", "redes_sociais", "mundo_aberto"]),
-        (["quinta", "19 de novembro", "lançamento", "nova zelândia", "meia-noite", "ps5", "xbox"], ["lancamento", "19_de_novembro", "nova_zelandia"]),
     ]
     for triggers, target_tags in keyword_boosts:
         if any(w in text_low for w in triggers) and any(tt in tags for tt in target_tags):
-            score += 5
+            score += 6
     return score
 
 
@@ -182,11 +277,11 @@ def select_semantic_assets(blocks, prefer_horizontal=True, research_data=None, f
     """
     Para CADA bloco do roteiro, seleciona:
     - 3 VÍDEOS 1080p DISTINTOS (`video_clips`: [vid_1, vid_2, vid_3]) cujas tags semânticas batem com
-      cada trecho da frase falada no bloco (garantindo que o vídeo mostre exatamente o assunto falado!)
+      cada trecho da frase falada no bloco (priorizando lives de Davy Jones, Bistecone, SanInPlay e gameplay de GTA 6)
     - 2 IMAGENS 4K DISTINTAS (`primary_img`, `secondary_img`) de apoio para os cards gráficos.
     """
     if ffmpeg_exe and research_data:
-        harvest_live_influencer_clips(research_data, ffmpeg_exe, max_new=4)
+        harvest_live_influencer_clips(research_data, ffmpeg_exe, max_new=6)
 
     available_vids = {}
     for fname, meta in VIDEO_SEMANTIC_MAP.items():
@@ -195,7 +290,11 @@ def select_semantic_assets(blocks, prefer_horizontal=True, research_data=None, f
             available_vids[fname] = (p, meta["tags"], meta["desc"])
     for inf_p in sorted(glob.glob(os.path.join(INFLUENCER_CLIPS_DIR, "inf_*.mp4"))):
         bn = os.path.basename(inf_p)
-        available_vids[bn] = (inf_p, ["influenciadores", "gameplay", "nova_zelandia", "lancamento", "gta6"], "Corte de influenciador/gameplay GTA 6")
+        available_vids[bn] = (
+            inf_p,
+            ["live", "streamers", "davy_jones", "bistecone", "gameplay", "lancamento", "gta6"],
+            "Corte ao vivo de streamer jogando GTA 6",
+        )
 
     available_imgs = {}
     for fname, meta in IMAGE_SEMANTIC_MAP.items():
@@ -223,7 +322,6 @@ def select_semantic_assets(blocks, prefer_horizontal=True, research_data=None, f
             ranked = []
             for vname, (vp, vtags, vdesc) in available_vids.items():
                 sc = _score_text_against_tags(s_low, vtags)
-                # Penaliza vídeos já usados recentemente para manter variedade máxima
                 if vname in chosen_vids:
                     sc -= 100
                 elif vname in used_vids[-8:]:
@@ -237,7 +335,6 @@ def select_semantic_assets(blocks, prefer_horizontal=True, research_data=None, f
                 chosen_vids.append(best_vp)
                 used_vids.append(best_vn)
 
-        # Seleciona imagens 4K semânticas de apoio
         full_low = (narration + " " + blk.get("headline", "") + " " + blk.get("callout", "")).lower()
         img_ranked = []
         for iname, (ip, itags, isubj) in available_imgs.items():
