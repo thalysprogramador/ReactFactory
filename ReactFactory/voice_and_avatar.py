@@ -137,51 +137,44 @@ def _call_chatterbox_hf(text, raw_wav_path, seed=42, exaggeration=0.58):
     return False
 
 
-def _call_gemini_tts(text, raw_wav_path, gemini_key, persona_prompt=UNIFIED_VOICE_PERSONA):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={gemini_key}"
-    prompt = f"{persona_prompt}: \"{text}\""
+def _call_gemini_tts(text, raw_wav_path, gemini_key, persona_prompt=UNIFIED_VOICE_PERSONA, voice_name="Orus"):
+    """
+    Usa exatamente a mesma voz humana natural do Vídeo Longo (gemini-3.8-flash-tts / voz Orus)
+    com fallback automático entre modelos TTS da família Gemini.
+    """
+    from producao.gemini_client import gemini_generate  # noqa: WPS433
+
+    clean_t = normalize_ptbr_phonetics(text)
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
+        "contents": [{"parts": [{"text": clean_t}]}],
         "generationConfig": {
-            "temperature": 0.2,
             "responseModalities": ["AUDIO"],
             "speechConfig": {
                 "voiceConfig": {
-                    "prebuiltVoiceConfig": {"voiceName": "Puck"}
+                    "prebuiltVoiceConfig": {"voiceName": voice_name}
                 }
             },
         },
     }
-    for attempt in range(2):
-        try:
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=75) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            pcm_b64 = data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
-            pcm_bytes = base64.b64decode(pcm_b64)
-            with wave.open(raw_wav_path, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(24000)
-                wf.writeframes(pcm_bytes)
-            return True
-        except Exception as e:
-            err_s = str(e)
-            if "400" in err_s and "temperature" in payload.get("generationConfig", {}):
-                payload["generationConfig"].pop("temperature", None)
-                continue
-            if "429" in err_s and attempt == 0:
-                print("[VOICE] Rate limit 429 no Gemini TTS, aguardando 22s antes de decidir...")
-                time.sleep(22)
-                continue
-            print(f"[VOICE] Aviso Gemini TTS ({e}).")
-            return False
-    return False
+    try:
+        data = gemini_generate(
+            payload,
+            models=["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts", "gemini-3.1-flash-tts-preview"],
+            attempts_per_model=2,
+            timeout=90,
+            verbose=False,
+        )
+        pcm_b64 = data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
+        pcm_bytes = base64.b64decode(pcm_b64)
+        with wave.open(raw_wav_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            wf.writeframes(pcm_bytes)
+        return True
+    except Exception as e:
+        print(f"[VOICE] Aviso Gemini TTS ({e}).")
+        return False
 
 
 def _call_edge_tts(text, raw_mp3_path, rate="+6%"):
@@ -227,13 +220,40 @@ def generate_realistic_voice(text, output_wav_path, style_hint=None):
 
 def generate_consistent_voices(texts_by_key, output_paths_by_key):
     """
-    Gera todas as falas com o MESMO motor, MESMA voz clonada/neural e
-    MESMA masterização (-14.5 LUFS) — nunca mistura duas vozes no mesmo vídeo.
-    Prioridade: Chatterbox PT-BR Humano -> Gemini TTS -> Edge-TTS AntonioNeural.
+    Gera todas as falas dos Shorts usando EXATAMENTE A MESMA VOZ HUMANA DO VÍDEO LONGO
+    (gemini-3.8-flash-tts, voz 'Orus', masterizada a -14.5 LUFS).
+    Prioridade: Gemini 3.8 Flash TTS (Orus) -> Chatterbox PT-BR -> Edge-TTS AntonioNeural.
     """
     keys = list(texts_by_key.keys())
 
-    # 1. Tenta 100% Chatterbox Multilingual PT-BR (voz humana idêntica seed=42)
+    # 1. Prioridade Máxima: Gemini 3.8 Flash TTS (voz Orus — idêntica ao Vídeo Longo!)
+    gemini_key = get_secret("GEMINI_API_KEY", "1_GEMINI_API_KEY.txt")
+    if gemini_key:
+        raw_files = {}
+        all_ok = True
+        for i, k in enumerate(keys):
+            raw_wav = output_paths_by_key[k] + ".raw.wav"
+            ok = _call_gemini_tts(texts_by_key[k], raw_wav, gemini_key, voice_name="Orus")
+            if not ok:
+                all_ok = False
+                break
+            raw_files[k] = raw_wav
+            if i < len(keys) - 1:
+                time.sleep(1.0)
+
+        if all_ok:
+            for k in keys:
+                _master_voice_wav(raw_files[k], output_paths_by_key[k])
+                if os.path.exists(raw_files[k]):
+                    os.remove(raw_files[k])
+                print(f"[VOICE] Gemini 3.8 TTS (Orus) uniforme [{k}]: {output_paths_by_key[k]} ({get_audio_duration(output_paths_by_key[k]):.2f}s)")
+            return "gemini-3.8-flash-tts"
+
+        for p in raw_files.values():
+            if os.path.exists(p):
+                os.remove(p)
+
+    # 2. Fallback: Chatterbox Multilingual PT-BR
     raw_cb = {}
     cb_ok = True
     for k in keys:
@@ -253,33 +273,7 @@ def generate_consistent_voices(texts_by_key, output_paths_by_key):
         if os.path.exists(p):
             os.remove(p)
 
-    # 2. Tenta 100% Gemini TTS
-    gemini_key = get_secret("GEMINI_API_KEY", "1_GEMINI_API_KEY.txt")
-    if gemini_key:
-        raw_files = {}
-        all_ok = True
-        for i, k in enumerate(keys):
-            raw_wav = output_paths_by_key[k] + ".raw.wav"
-            ok = _call_gemini_tts(normalize_ptbr_phonetics(texts_by_key[k]), raw_wav, gemini_key, UNIFIED_VOICE_PERSONA)
-            if not ok:
-                all_ok = False
-                break
-            raw_files[k] = raw_wav
-            if i < len(keys) - 1:
-                time.sleep(2.0)
-
-        if all_ok:
-            for k in keys:
-                _master_voice_wav(raw_files[k], output_paths_by_key[k])
-                if os.path.exists(raw_files[k]):
-                    os.remove(raw_files[k])
-                print(f"[VOICE] Gemini TTS uniforme [{k}]: {output_paths_by_key[k]} ({get_audio_duration(output_paths_by_key[k]):.2f}s)")
-            return "gemini"
-
-        for p in raw_files.values():
-            if os.path.exists(p):
-                os.remove(p)
-        print("[VOICE] Padronizando 100% das falas em Edge-TTS Neural...")
+    print("[VOICE] Padronizando 100% das falas em Edge-TTS Neural...")
 
     for k in keys:
         mp3_temp = output_paths_by_key[k] + ".mp3"
