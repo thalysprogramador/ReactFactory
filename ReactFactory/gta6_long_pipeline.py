@@ -18,53 +18,108 @@ from kaggle_chatterbox import run_batch_chatterbox_kaggle  # noqa: E402
 from uploader import upload_long_to_youtube  # noqa: E402
 
 
+from producao.agentes import (  # noqa: E402
+    AgenteControleQualidade,
+    AgenteDiretorCriativo,
+    AgentePesquisadorRoteirista,
+    synthesize_studio_narration_batch,
+)
+from producao.studio_composer import compose_studio_video  # noqa: E402
+from composer import FFMPEG_EXE  # noqa: E402
+
+
 def run_gta6_long_pipeline(do_upload=False):
     print("====================================================")
-    print("   INICIANDO ESTEIRA PRO GTA 6 LONGO (8-9 MIN 16:9)")
+    print("   PRODUTORA AUDIOVISUAL GTA 6 — PIPELINE 16 ETAPAS ")
     print("====================================================")
 
     os.makedirs(GTA6_TEMP_DIR, exist_ok=True)
     work_dir = os.path.join(GTA6_TEMP_DIR, "long_work")
     os.makedirs(work_dir, exist_ok=True)
 
+    # ETAPAS 1-3: Pesquisa diária, seleção de pauta e verificação de fontes
     research = research_gta6_references(kind="long")
-    mp4_vault, jpg_vault = sync_rockstar_gta6_vault(max_mp4=10, max_jpg=22)
+    mp4_vault, jpg_vault = sync_rockstar_gta6_vault(max_mp4=12, max_jpg=30)
 
-    script_data = generate_gta6_long_script(research)
+    # ETAPA 4: Direção Criativa (Agente 1)
+    direcao = AgenteDiretorCriativo.definir_direcao_criativa(research, formato="long")
+
+    # ETAPAS 5-6: Roteiro verificado + Storyboard semântico (Agente 2)
+    try:
+        script_data = AgentePesquisadorRoteirista.gerar_roteiro_longo_verificado(
+            research, direcao, num_acts=5, blocks_per_act=7
+        )
+    except Exception as err_ag2:
+        print(f"[GTA6 STUDIO] Aviso Agente 2 ({err_ag2}) -> usando gerador de contingência.")
+        script_data = generate_gta6_long_script(research)
+        script_data["acts"] = AgenteDiretorCriativo.enriquecer_storyboard(script_data.get("acts", []), formato="long")
+
     with open(os.path.join(work_dir, "script_gta6_long.json"), "w", encoding="utf-8") as sf:
         json.dump(script_data, sf, indent=2, ensure_ascii=False)
 
-    chunks = []
+    # ETAPA 7: Narração profissional padronizada + Alinhamento palavra-por-palavra (faster-whisper)
+    flat_blocks = []
     for a_idx, act in enumerate(script_data["acts"]):
         act_num = int(act.get("act_num", a_idx + 1))
         for b_idx, blk in enumerate(act["blocks"]):
             cid = f"a{act_num}_b{b_idx}"
-            chunks.append({
-                "id": cid,
-                "text": blk["narration"],
-                "output_wav": os.path.join(work_dir, f"narr_{cid}.wav"),
-                "exaggeration": 0.56,
-            })
+            blk["id"] = cid
+            flat_blocks.append(blk)
 
-    wav_map, engine_used = run_batch_chatterbox_kaggle(chunks, out_dir=work_dir, timeout_sec=1200)
-    print(f"[GTA6 LONG VOICE] Motor usado em 100% da narração: {engine_used}")
+    wav_map, words_map, engine_used = synthesize_studio_narration_batch(
+        flat_blocks, work_dir, FFMPEG_EXE, voice_name="Orus"
+    )
+    print(f"[GTA6 LONG VOICE] Motor usado na narração: {engine_used}")
 
+    # ETAPAS 8-12: Animações Remotion/Three.js, B-roll 1080p, Sound Design Dinâmico e Renderização
     out_mp4 = os.path.join(BASE_DIR, "output_gta6_long.mp4")
     out_thumb = os.path.join(BASE_DIR, "output_gta6_long_thumb.jpg")
-    _, _, chapters_ts, real_dur = compose_gta6_long_video(
+    music_credits = []
+    try:
+        _, _, chapters_ts, music_credits, real_dur = compose_studio_video(
+            script_data=script_data,
+            wav_map=wav_map,
+            words_map=words_map,
+            work_dir=work_dir,
+            output_mp4=out_mp4,
+            output_thumb_jpg=out_thumb,
+        )
+    except Exception as err_rem:
+        print(f"[GTA6 STUDIO] Aviso Remotion ({err_rem}) -> usando compositor OpenCV 1080p24.")
+        _, _, chapters_ts, real_dur = compose_gta6_long_video(
+            script_data=script_data,
+            wav_map=wav_map,
+            mp4_vault=mp4_vault,
+            jpg_vault=jpg_vault,
+            work_dir=work_dir,
+            output_mp4=out_mp4,
+            output_thumb_jpg=out_thumb,
+        )
+
+    # ETAPAS 13-14: Revisão pelo Controle de Qualidade (Agente 5)
+    qc = AgenteControleQualidade.auditar_producao(
+        video_path=out_mp4,
         script_data=script_data,
         wav_map=wav_map,
-        mp4_vault=mp4_vault,
-        jpg_vault=jpg_vault,
-        work_dir=work_dir,
-        output_mp4=out_mp4,
-        output_thumb_jpg=out_thumb,
+        words_map=words_map,
+        music_credits=music_credits,
+        formato="long",
     )
+    print(f"[AGENTE 5 - QC] Aprovado={qc['approved']} | Score={qc['score']}% | Motivos={qc['reasons']}")
+    if not qc["approved"] and not os.path.exists(out_mp4):
+        raise RuntimeError(f"Vídeo reprovado pelo Controle de Qualidade: {qc['reasons']}")
 
+    credits_str = "\n".join(
+        f"• {c.get('title')} — {c.get('creator')} ({c.get('license')})"
+        for c in music_credits
+        if c.get("creator")
+    )
     desc = (
         f"{script_data.get('long_description', '').strip()}\n\n"
         "Capítulos:\n" + "\n".join(chapters_ts)
     )
+    if credits_str:
+        desc += f"\n\nTrilha Sonora & Licenças:\n{credits_str}"
 
     yt_id = None
     if do_upload:
