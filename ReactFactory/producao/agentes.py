@@ -53,8 +53,8 @@ class AgenteDiretorCriativo:
         return direcao
 
     @staticmethod
-    def enriquecer_storyboard(acts, formato="long"):
-        """Garante variedade de cenas e coerência semântica entre texto e tipo de animação."""
+    def enriquecer_storyboard(acts, formato="long", research_data=None):
+        """Garante variedade de cenas e coerência semântica entre texto e vídeo/animação."""
         flat_blocks = []
         for a_idx, act in enumerate(acts):
             act_num = int(act.get("act_num", a_idx + 1))
@@ -82,8 +82,16 @@ class AgenteDiretorCriativo:
                 blk["bgm_mood"] = act.get("bgm_mood", "synth")
                 flat_blocks.append(blk)
 
-        semantic_assets = select_semantic_assets(flat_blocks, prefer_horizontal=(formato == "long"))
+        from composer import FFMPEG_EXE  # noqa: WPS433
+
+        semantic_assets = select_semantic_assets(
+            flat_blocks,
+            prefer_horizontal=(formato == "long"),
+            research_data=research_data,
+            ffmpeg_exe=FFMPEG_EXE,
+        )
         for blk, asset in zip(flat_blocks, semantic_assets):
+            blk["video_clips"] = asset.get("video_clips", [])
             blk["primary_img"] = asset["primary_img"]
             blk["secondary_img"] = asset["secondary_img"]
             blk["asset_subject"] = asset["subject"]
@@ -104,16 +112,17 @@ class AgentePesquisadorRoteirista:
     ]
 
     @staticmethod
-    def gerar_roteiro_longo_verificado(research_data, direcao_criativa, num_acts=5, blocks_per_act=6):
+    def gerar_roteiro_longo_verificado(research_data, direcao_criativa, num_acts=5, blocks_per_act=5):
+        refs_list = research_data.get("top_references") or research_data.get("top_videos") or []
         refs_txt = "\n".join(
             f"- [{r.get('channel', 'Fonte')}] {r.get('title', '')} ({r.get('views', 0)} views)"
-            for r in research_data.get("top_videos", [])[:15]
+            for r in refs_list[:18]
         )
         news_txt = "\n".join(
             f"- [Notícia] {n.get('title', '')} ({n.get('source', '')})"
-            for n in research_data.get("news", [])[:10]
+            for n in research_data.get("news", [])[:12]
         )
-        angle = research_data.get("chosen_angle", "COMO VAI SER O LANÇAMENTO DO GTA 6 NA QUINTA-FEIRA (19 DE NOVEMBRO)")
+        angle = research_data.get("chosen_angle", "LANÇAMENTO DO GTA 6 NA NOVA ZELÂNDIA E PRIMEIRAS HORAS EM LEONIDA")
 
         prompt = f"""Você é o AGENTE 2 (Pesquisador-Chefe e Roteirista Documental) de uma produtora audiovisual profissional especializada em GTA 6.
 Contexto temporal: Hoje é véspera do lançamento histórico de Grand Theft Auto VI, confirmado oficialmente pela Rockstar Games para QUINTA-FEIRA, 19 DE NOVEMBRO DE 2026 (PS5 e Xbox Series X|S).
@@ -174,7 +183,7 @@ Retorne APENAS JSON válido no formato:
 }}"""
         data, model_used = gemini_text(prompt, json_mode=True, temperature=0.68)
         data["model_used"] = model_used
-        data["acts"] = AgenteDiretorCriativo.enriquecer_storyboard(data.get("acts", []), formato="long")
+        data["acts"] = AgenteDiretorCriativo.enriquecer_storyboard(data.get("acts", []), formato="long", research_data=research_data)
         return data
 
 
