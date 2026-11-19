@@ -153,11 +153,10 @@ def draw_caption_chunk(frame_bgr, text, highlight_idx=0, y_center=1415):
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
-def draw_top_headline(frame_bgr, headline_text, progress_0_1=0.0, source_badge="AO VIVO • CORTES GTA 6"):
+def draw_top_headline(frame_bgr, headline_text, progress_0_1=0.0, source_badge=None):
     """
-    Gancho Superior Cinema V4 (Fonte Anton Display Condensada):
-    - Tipografia condensada estilo cinema/documentário com impacto imediato nos primeiros 0.5s.
-    - Badge minimalista translúcido no topo + barra de retenção dourada ultra-fina.
+    Gancho Superior Limpo V5 para Shorts (Fonte Anton Display — SEM tarja 'AO VIVO CORTES GTA'):
+    - Visual 100% humanizado: apenas o título/gancho forte em Anton no topo, sem selos ou badges artificiais.
     """
     clean_h = _clean_text(headline_text).upper()
     if not clean_h:
@@ -166,23 +165,6 @@ def draw_top_headline(frame_bgr, headline_text, progress_0_1=0.0, source_badge="
     img_pil = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil, "RGBA")
 
-    # 1. Pill minimalista '● AO VIVO • CORTES GTA 6'
-    f_badge = load_font(22, style="poppins")
-    tb = draw.textbbox((0, 0), source_badge, font=f_badge)
-    bw = (tb[2] - tb[0]) + 56
-    bx0 = (1080 - bw) // 2
-    by0 = 112
-    draw.rounded_rectangle(
-        [bx0, by0, bx0 + bw, by0 + 42],
-        radius=21,
-        fill=(10, 13, 22, 215),
-        outline=(255, 255, 255, 55),
-        width=1,
-    )
-    draw.ellipse([bx0 + 16, by0 + 14, bx0 + 30, by0 + 28], fill=(239, 68, 68, 255))
-    draw.text((bx0 + 40, by0 + 7), source_badge, font=f_badge, fill=(248, 250, 252, 245))
-
-    # 2. Manchete Cinema em Anton (1 ou 2 linhas equilibradas, nunca trunca palavras!)
     words = clean_h.split()
     if len(words) <= 4 and len(clean_h) <= 22:
         lines = [clean_h]
@@ -197,68 +179,57 @@ def draw_top_headline(frame_bgr, headline_text, progress_0_1=0.0, source_badge="
         lines = [" ".join(words[:best_mid]), " ".join(words[best_mid:])]
 
     max_line_chars = max(len(ln) for ln in lines)
-    f_size = 72 if max_line_chars <= 22 else (62 if max_line_chars <= 28 else 54)
+    f_size = 74 if max_line_chars <= 22 else (64 if max_line_chars <= 28 else 54)
     f_head = load_font(f_size, style="anton")
-    yy = 192 if len(lines) == 1 else 168
+    yy = 215 if len(lines) == 1 else 188
     for idx_l, ln in enumerate(lines):
         lb = draw.textbbox((0, 0), ln, font=f_head)
         lw = lb[2] - lb[0]
         lx = (1080 - lw) // 2
         col = (255, 224, 27, 255) if idx_l == len(lines) - 1 else (255, 255, 255, 255)
-        draw.text((lx + 3, yy + 7), ln, font=f_head, fill=(0, 0, 0, 210), stroke_width=9, stroke_fill=(0, 0, 0, 210))
+        draw.text((lx + 3, yy + 7), ln, font=f_head, fill=(0, 0, 0, 215), stroke_width=9, stroke_fill=(0, 0, 0, 215))
         draw.text((lx, yy), ln, font=f_head, fill=col, stroke_width=6, stroke_fill=(8, 10, 16, 255))
-        yy += int(f_size * 1.12)
-
-    if progress_0_1 > 0:
-        pw = int(1080 * min(1.0, max(0.0, progress_0_1)))
-        draw.rectangle([0, 0, pw, 5], fill=(255, 190, 11, 240))
+        yy += int(f_size * 1.14)
 
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
-def fit_widescreen_cinematic(frame, target_w=1080, target_h=1920, zoom=1.02, pan_x=0.0):
+def fit_widescreen_cinematic(frame, target_w=1080, target_h=1920, zoom=1.0, pan_x=0.0):
     """
-    Enquadramento Cinema Vertical V4 para Shorts (SEM ULTRA-ZOOM, SEM AVATAR E SEM VAZIO PRETO):
-    - Fundo ambiente rico com blur suave + gradiente cinema (mantém cor e atmosfera de Vice City no topo/base).
-    - Janela principal grande (1080x880 em y=360..1240 quando target_h=1920) com fusão suave (feather gradient)
-      nas bordas superior e inferior — sem linha amarela dura de PowerPoint!
-    - Preserva ~86% da largura horizontal 16:9 (mostra toda a gameplay e reação do streamer com conforto visual).
+    Enquadramento Vertical V5 para Shorts (ZERO CORTE LATERAL — 100% da imagem 16:9 visível!):
+    - Preserva a proporção original do vídeo 16:9 (1080x608 sem cortar absolutamente nada nas laterais!)
+      centralizado confortavelmente em y=490..1098 sobre fundo ambiente desfocado e colorido do próprio jogo.
+    - Se o vídeo fonte já for vertical (9:16), preenche 1080x1920 nativamente.
     """
     h, w = frame.shape[:2]
     if w <= h * 1.05:
-        return crop_resize(frame, target_w, target_h, zoom=min(1.03, zoom), pan_x=pan_x)
+        return crop_resize(frame, target_w, target_h, zoom=1.0, pan_x=0.0)
 
-    # 1. Fundo ambiente rico em cor e profundidade (42% de luminosidade + vinheta suave no topo/base)
+    # 1. Fundo ambiente desfocado com atmosfera do jogo
     bg_small = cv2.resize(frame, (180, 320), interpolation=cv2.INTER_AREA)
-    bg_blur = cv2.GaussianBlur(bg_small, (31, 31), 0)
-    bg = cv2.resize(bg_blur, (target_w, target_h), interpolation=cv2.INTER_LINEAR).astype(np.float32) * 0.42
-    # Vinheta vertical elegante para destacar manchete no topo e legenda na base
+    bg_blur = cv2.GaussianBlur(bg_small, (35, 35), 0)
+    bg = cv2.resize(bg_blur, (target_w, target_h), interpolation=cv2.INTER_LINEAR).astype(np.float32) * 0.38
     v_grad = np.ones((target_h, 1, 1), dtype=np.float32)
-    v_grad[:340] = np.linspace(0.32, 0.85, 340, dtype=np.float32)[:, None, None]
-    v_grad[target_h - 460 :] = np.linspace(0.85, 0.28, 460, dtype=np.float32)[:, None, None]
+    v_grad[:420] = np.linspace(0.28, 0.85, 420, dtype=np.float32)[:, None, None]
+    v_grad[target_h - 520 :] = np.linspace(0.85, 0.25, 520, dtype=np.float32)[:, None, None]
     bg = np.clip(bg * v_grad, 0, 255).astype(np.uint8)
 
-    if target_h >= 1600:
-        win_h = 840
-        y0 = 370
-    else:
-        win_h = 680
-        y0 = 215
+    # 2. Encaixe exato sem cortes: mantém 100% da largura original (16:9 -> 1080x608)
+    exact_h = max(480, min(int(round(target_w * (h / float(w)))), 760))
+    fg = cv2.resize(frame, (target_w, exact_h), interpolation=cv2.INTER_AREA)
+    fg_f = np.clip((fg.astype(np.float32) - 124.0) * 1.04 + 124.0, 0, 255)
 
-    # 2. Janela principal 16:9 expandida suavemente (sem ultra-zoom) com color grading cinema
-    fg = crop_resize(frame, target_w, win_h, zoom=min(1.03, zoom), pan_x=pan_x)
-    fg_f = fg.astype(np.float32)
-    fg_f = np.clip((fg_f - 124.0) * 1.06 + 124.0, 0, 255)
+    y0 = (target_h - exact_h) // 2 - 110 if target_h >= 1600 else (target_h - exact_h) // 2
+    y0 = max(360, min(y0, target_h - exact_h - 320)) if target_h >= 1600 else max(0, y0)
 
-    # Feather suave de 36px nas bordas superior e inferior da janela (integração orgânica estilo cinema!)
-    alpha = np.ones((win_h, 1, 1), dtype=np.float32)
-    feather = 36
+    # Fusão suave de 14px apenas na borda superior/inferior para visual limpo e sem cortes
+    alpha = np.ones((exact_h, 1, 1), dtype=np.float32)
+    feather = 14
     alpha[:feather] = np.linspace(0.0, 1.0, feather, dtype=np.float32)[:, None, None]
     alpha[-feather:] = np.linspace(1.0, 0.0, feather, dtype=np.float32)[:, None, None]
 
-    roi = bg[y0 : y0 + win_h, :].astype(np.float32)
-    blended = fg_f * alpha + roi * (1.0 - alpha)
-    bg[y0 : y0 + win_h, :] = np.clip(blended, 0, 255).astype(np.uint8)
+    roi = bg[y0 : y0 + exact_h, :].astype(np.float32)
+    bg[y0 : y0 + exact_h, :] = np.clip(fg_f * alpha + roi * (1.0 - alpha), 0, 255).astype(np.uint8)
     return bg
 
 
@@ -475,10 +446,10 @@ def compose_react_short(
                 prog = outro_t / max(0.1, outro_dur)
                 caption_str, active_word_idx = get_active_chunk(outro_words, prog)
 
-        canvas = draw_top_headline(canvas, headline, progress_0_1=(t / max(0.1, t_total)), source_badge=source_badge)
+        canvas = draw_top_headline(canvas, headline, progress_0_1=(t / max(0.1, t_total)))
 
         if caption_str:
-            canvas = draw_caption_chunk(canvas, caption_str, active_word_idx, y_center=1335)
+            canvas = draw_caption_chunk(canvas, caption_str, active_word_idx, y_center=1230)
 
         writer.write(canvas)
 
@@ -490,7 +461,7 @@ def compose_react_short(
     subprocess.run(
         [
             FFMPEG_EXE, "-y", "-ss", "0", "-t", f"{part1_dur:.2f}", "-i", viral_video_path,
-            "-vn", "-af", "volume=0.80", "-ar", "24000", "-ac", "1", v_aud_p1,
+            "-vn", "-af", "volume=1.05", "-ar", "24000", "-ac", "1", v_aud_p1,
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -499,7 +470,7 @@ def compose_react_short(
     subprocess.run(
         [
             FFMPEG_EXE, "-y", "-ss", f"{inter_sec:.2f}", "-t", f"{part2_dur:.2f}", "-i", viral_video_path,
-            "-vn", "-af", "volume=0.78", "-ar", "24000", "-ac", "1", v_aud_p2,
+            "-vn", "-af", "volume=1.05", "-ar", "24000", "-ac", "1", v_aud_p2,
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -516,14 +487,14 @@ def compose_react_short(
     outro_rel_p2 = max(0.0, (ms_outro - ms_part2) / 1000.0)
     filter_complex = (
         f"[0:a]volume=1.22[a_hook];"
-        f"[1:a]adelay={ms_part1}|{ms_part1},volume=0.52[a_vp1];"
+        f"[1:a]adelay={ms_part1}|{ms_part1},volume=0.88[a_vp1];"
         f"[2:a]adelay={ms_inter}|{ms_inter},volume=1.22[a_inter];"
-        f"[3:a]volume='if(gte(t,{outro_rel_p2:.2f}),0.18,0.48)':eval=frame,adelay={ms_part2}|{ms_part2}[a_vp2];"
+        f"[3:a]volume='if(gte(t,{outro_rel_p2:.2f}),0.22,0.88)':eval=frame,adelay={ms_part2}|{ms_part2}[a_vp2];"
         f"[4:a]adelay={ms_outro}|{ms_outro},volume=1.22[a_outro];"
-        f"[5:a]volume=0.34[a_whoosh];"
-        f"[6:a]adelay={ms_inter}|{ms_inter},volume=0.38[a_freeze];"
-        f"[7:a]adelay={ms_part1}|{ms_part1},volume=0.30[a_pop1];"
-        f"[8:a]adelay={ms_outro}|{ms_outro},volume=0.28[a_pop2];"
+        f"[5:a]volume=0.30[a_whoosh];"
+        f"[6:a]adelay={ms_inter}|{ms_inter},volume=0.34[a_freeze];"
+        f"[7:a]adelay={ms_part1}|{ms_part1},volume=0.26[a_pop1];"
+        f"[8:a]adelay={ms_outro}|{ms_outro},volume=0.26[a_pop2];"
         f"[a_hook][a_vp1][a_inter][a_vp2][a_outro][a_whoosh][a_freeze][a_pop1][a_pop2]amix=inputs=9:duration=longest:dropout_transition=0:normalize=0,volume=0.96[a_final]"
     )
 
