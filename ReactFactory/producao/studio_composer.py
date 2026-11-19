@@ -174,20 +174,19 @@ def _build_top_editorial_bar(badge_type, source_label, act_num, total_acts, act_
 
 def _draw_lower_third_and_hud(frame_bgr, top_hud_strip, headline, subheadline, callout, f_idx, show_lower_third=True):
     """
-    Aplica a barra editorial superior de 64px e, apenas nos primeiros 3.8 segundos do bloco,
-    um Lower-Third broadcast minimalista em Obsidian Glass com acento Warm Gold (#F59E0B).
+    Visual Humanizado V5:
+    - ZERO tarjas/selos artificiais no topo da tela ('CONFIRMADO', 'VERIFICADO', etc. removidos).
+    - Apenas nos primeiros 3.5s de um novo tópico, exibe um Lower-Third discreto e limpo no canto inferior esquerdo.
     """
     out = frame_bgr.copy()
-    out[0:64, :] = cv2.addWeighted(top_hud_strip, 0.88, out[0:64, :], 0.12, 0)
-
     if not show_lower_third:
         return out
 
-    # Entrada suave nos primeiros 12 frames e saída suave nos últimos 12 frames da janela de 92 frames (3.8s)
+    # Entrada suave nos primeiros 12 frames e saída suave nos últimos 12 frames da janela de 86 frames (~3.5s)
     if f_idx < 12:
         p = f_idx / 12.0
-    elif f_idx > 80:
-        p = max(0.0, (92 - f_idx) / 12.0)
+    elif f_idx > 74:
+        p = max(0.0, (86 - f_idx) / 12.0)
     else:
         p = 1.0
     ease = 1.0 - (1.0 - p) ** 3
@@ -205,8 +204,8 @@ def _draw_lower_third_and_hud(frame_bgr, top_hud_strip, headline, subheadline, c
     bw = 740
     bh = 132
 
-    bg_a = int(224 * alpha_mul)
-    bd_a = int(48 * alpha_mul)
+    bg_a = int(214 * alpha_mul)
+    bd_a = int(42 * alpha_mul)
     ac_a = int(255 * alpha_mul)
     tx_a = int(250 * alpha_mul)
     sb_a = int(205 * alpha_mul)
@@ -220,7 +219,7 @@ def _draw_lower_third_and_hud(frame_bgr, top_hud_strip, headline, subheadline, c
     )
     draw.rounded_rectangle([bx0, by0 + 12, bx0 + 5, by0 + bh - 12], radius=2, fill=(255, 190, 11, ac_a))
 
-    tag_str = f"DOSSIE GTA VI  •  {_clean_ascii(callout or 'LEONIDA').upper()}"
+    tag_str = _clean_ascii(callout or "GTA VI").upper()
     draw.text((bx0 + 24, by0 + 12), tag_str[:50], font=f_tag, fill=(255, 190, 11, ac_a))
     draw.text((bx0 + 24, by0 + 36), _clean_ascii(headline).upper()[:42], font=f_head, fill=(248, 250, 252, tx_a))
     draw.text((bx0 + 24, by0 + 92), _clean_ascii(subheadline)[:68], font=f_sub, fill=(148, 163, 184, sb_a))
@@ -415,7 +414,25 @@ def _render_block_video(job, fallback_clips, sfx_pack, work_dir):
     proc.stdin.close()
     proc.wait()
 
-    # Sound Design Contextual (Agente 4) — sutil e calibrado para broadcast
+    # Extrai o ÁUDIO ORIGINAL da cena pesquisada (se o clipe tiver áudio) para manter o som real do jogo/live!
+    orig_aud_wav = os.path.join(work_dir, f"orig_aud_{bid}.wav")
+    has_orig_audio = False
+    for cand_v in sem_vids:
+        if cand_v and os.path.exists(cand_v):
+            r_ext = subprocess.run(
+                [
+                    FFMPEG_EXE, "-y", "-i", cand_v, "-t", f"{dur:.2f}",
+                    "-vn", "-ar", "48000", "-ac", "2", orig_aud_wav,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if r_ext.returncode == 0 and os.path.exists(orig_aud_wav) and os.path.getsize(orig_aud_wav) > 12_000:
+                has_orig_audio = True
+                break
+
+    # Sound Design Contextual + Áudio Original da Cena (ducked durante a narração, destacado no momento do acontecimento!)
     if scene_type == "map_zoom":
         sfx_file = sfx_pack["radar_ping"]
     elif scene_type == "data_comparison":
@@ -427,15 +444,41 @@ def _render_block_video(job, fallback_clips, sfx_pack, work_dir):
 
     mid_whoosh_ms = int(dur * (0.45 if remotion_frames else 0.34) * 1000)
     fade_out_st = max(0.0, dur - 0.30)
-    aud_fc = (
-        f"[1:a]volume=1.24[vo];"
-        f"[2:a]atrim=0:{dur:.2f},afade=t=in:st=0:d=0.20,afade=t=out:st={fade_out_st:.2f}:d=0.30,volume=0.20[bm];"
-        f"[3:a]volume=0.32[sx1];"
-        f"[4:a]adelay={mid_whoosh_ms}|{mid_whoosh_ms},volume=0.26[sx2];"
-        f"[vo][bm][sx1][sx2]amix=inputs=4:duration=first:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[aout]"
-    )
-    subprocess.run(
-        [
+    vo_dur = get_media_duration(job["wav_p"])
+
+    if has_orig_audio:
+        # Mantém o áudio original do clipe baixo (0.28) enquanto o narrador fala e sobe para 0.96 no respiro da cena!
+        aud_fc = (
+            f"[1:a]volume=1.24[vo];"
+            f"[2:a]atrim=0:{dur:.2f},afade=t=in:st=0:d=0.20,afade=t=out:st={fade_out_st:.2f}:d=0.30,volume=0.14[bm];"
+            f"[3:a]volume=0.28[sx1];"
+            f"[4:a]adelay={mid_whoosh_ms}|{mid_whoosh_ms},volume=0.22[sx2];"
+            f"[5:a]atrim=0:{dur:.2f},afade=t=in:st=0:d=0.15,afade=t=out:st={fade_out_st:.2f}:d=0.25,"
+            f"volume='if(gte(t,{max(0.5, vo_dur - 0.15):.2f}),0.96,0.30)':eval=frame[orig];"
+            f"[vo][bm][sx1][sx2][orig]amix=inputs=5:duration=longest:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[aout]"
+        )
+        ff_cmd = [
+            FFMPEG_EXE, "-y",
+            "-i", silent_mp4,
+            "-i", job["wav_p"],
+            "-stream_loop", "-1", "-ss", f"{job['bgm_ss']:.2f}", "-i", job["bgm_file"],
+            "-i", sfx_file,
+            "-i", sfx_pack["whoosh"],
+            "-stream_loop", "-1", "-i", orig_aud_wav,
+            "-filter_complex", aud_fc,
+            "-map", "0:v", "-map", "[aout]", "-t", f"{dur:.2f}",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+            "-video_track_timescale", "24000", job["seg_out"],
+        ]
+    else:
+        aud_fc = (
+            f"[1:a]volume=1.24[vo];"
+            f"[2:a]atrim=0:{dur:.2f},afade=t=in:st=0:d=0.20,afade=t=out:st={fade_out_st:.2f}:d=0.30,volume=0.20[bm];"
+            f"[3:a]volume=0.30[sx1];"
+            f"[4:a]adelay={mid_whoosh_ms}|{mid_whoosh_ms},volume=0.24[sx2];"
+            f"[vo][bm][sx1][sx2]amix=inputs=4:duration=first:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[aout]"
+        )
+        ff_cmd = [
             FFMPEG_EXE, "-y",
             "-i", silent_mp4,
             "-i", job["wav_p"],
@@ -446,21 +489,17 @@ def _render_block_video(job, fallback_clips, sfx_pack, work_dir):
             "-map", "0:v", "-map", "[aout]", "-t", f"{dur:.2f}",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
             "-video_track_timescale", "24000", job["seg_out"],
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+        ]
+
+    subprocess.run(ff_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return bid
 
 
 def build_editorial_thumbnail(jpg_path, headline, subheadline, out_jpg):
     """
-    Motor de Thumbnail Cinema 3D V4 (Renderizado em Headless Chromium via Remotion `GtaThumbnail3D`):
-    - Tipografia 3D extrudada metálica (Ouro + Branco em fonte Anton Display com perspectiva inclinada).
-    - Monitor 3D flutuante em perspectiva com brilho de vidro mostrando a live real (Davy Jones / Bistecone).
-    - Cena hero 1080p de alto impacto com color grading RAGE 9 e iluminação volumétrica.
-    - Zero retângulos amadores ou fontes genéricas de PIL!
+    Motor de Thumbnail Cinema 3D V5 (Foco 100% NO JOGO — Visual Humanizado, ZERO Streamer PiP, ZERO Selos 'AO VIVO'):
+    - Extrai frame real de alto impacto diretamente da gameplay pesquisada (se receber .mp4 ou .jpg).
+    - Tipografia 3D extrudada metálica (Ouro + Branco em fonte Anton Display) extraída da descoberta do vídeo.
     """
     import base64
     import json
@@ -468,18 +507,26 @@ def build_editorial_thumbnail(jpg_path, headline, subheadline, out_jpg):
 
     def _to_b64_data_uri(img_or_path):
         if isinstance(img_or_path, str) and os.path.exists(img_or_path):
-            raw = open(img_or_path, "rb").read()
-            return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
+            if img_or_path.lower().endswith((".mp4", ".mkv", ".mov")):
+                cap = cv2.VideoCapture(img_or_path)
+                n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 1)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, int(n * 0.45))
+                ok, fr = cap.read()
+                cap.release()
+                if ok and fr is not None:
+                    ok2, buf = cv2.imencode(".jpg", fr, [int(cv2.IMWRITE_JPEG_QUALITY), 93])
+                    if ok2:
+                        return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
+            else:
+                raw = open(img_or_path, "rb").read()
+                return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
         if isinstance(img_or_path, np.ndarray):
             ok, buf = cv2.imencode(".jpg", img_or_path, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
             if ok:
                 return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
         return ""
 
-    # 1. Seleciona cena hero de alto impacto visual (varia entre cenas cinematográficas reais de GTA 6)
-    hero_uri = ""
-    if jpg_path and os.path.exists(jpg_path):
-        hero_uri = _to_b64_data_uri(jpg_path)
+    hero_uri = _to_b64_data_uri(jpg_path) if jpg_path else ""
     if not hero_uri:
         vault_picks = [
             os.path.join(BASE_DIR, "temp_gta6", "vault", fn)
@@ -489,43 +536,23 @@ def build_editorial_thumbnail(jpg_path, headline, subheadline, out_jpg):
         if vault_picks:
             hero_uri = _to_b64_data_uri(random.choice(vault_picks))
 
-    # 2. Captura frame real da live de Davy Jones ou Bistecone para o monitor 3D flutuante
-    live_uri = ""
-    live_candidates = [
-        os.path.join(BASE_DIR, "assets", "gta6_clips", "gta6_live_bistecone_01.mp4"),
-        os.path.join(BASE_DIR, "assets", "gta6_clips", "gta6_live_davyjones_02.mp4"),
-        os.path.join(BASE_DIR, "assets", "gta6_clips", "gta6_live_bistecone_02.mp4"),
-    ]
-    existing_lives = [p for p in live_candidates if os.path.exists(p)]
-    if existing_lives:
-        cap = cv2.VideoCapture(random.choice(existing_lives))
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 40)
-        ok, lfr = cap.read()
-        cap.release()
-        if ok and lfr is not None:
-            live_uri = _to_b64_data_uri(cv2.resize(lfr, (640, 360), interpolation=cv2.INTER_AREA))
-
-    # 3. Divide a manchete em 2 linhas de impacto (Linha 1: Branco 3D | Linha 2: Ouro Metálico 3D)
-    clean_h = (_clean_ascii(headline) or "ELES TRAVARAM AO VIVO!").upper()
+    clean_h = (_clean_ascii(headline) or "BUGS ABSURDOS NO GTA 6!").upper()
     words = clean_h.split()
     if len(words) <= 2:
-        line1 = "GTA 6 AO VIVO"
+        line1 = "GTA 6"
         line2 = clean_h
     else:
         mid = max(1, len(words) // 2)
         line1 = " ".join(words[:mid])
         line2 = " ".join(words[mid:])
 
-    clean_sub = (_clean_ascii(subheadline) or "DAVY JONES & BISTECONE EM VICE CITY").upper()[:46]
+    clean_sub = (_clean_ascii(subheadline) or "").upper()[:48]
 
     props = {
         "heroImageUrl": hero_uri,
-        "livePipUrl": live_uri,
-        "topKicker": "GTA VI • LANÇAMENTO & LIVES",
         "line1": line1,
         "line2": line2,
         "subline": clean_sub,
-        "liveLabel": "AO VIVO • PS5 PRO",
         "accentColor": "#FFBE0B",
     }
 
@@ -551,14 +578,13 @@ def build_editorial_thumbnail(jpg_path, headline, subheadline, out_jpg):
                 os.remove(out_png)
             except OSError:
                 pass
-            print(f"[THUMB 3D V4] Renderizada via Remotion Chromium: {out_jpg}", flush=True)
+            print(f"[THUMB 3D V5] Renderizada via Remotion Chromium (100% Foco no Jogo): {out_jpg}", flush=True)
             return out_jpg
-        print(f"[THUMB 3D V4] Aviso Remotion ({r.returncode}): {r.stderr[-220:]}", flush=True)
+        print(f"[THUMB 3D V5] Aviso Remotion ({r.returncode}): {r.stderr[-220:]}", flush=True)
     except Exception as e_th:
-        print(f"[THUMB 3D V4] Fallback ({e_th})", flush=True)
+        print(f"[THUMB 3D V5] Fallback ({e_th})", flush=True)
 
-    # Fallback de emergência caso Chromium falhe
-    if jpg_path and os.path.exists(jpg_path):
+    if jpg_path and os.path.exists(jpg_path) and not jpg_path.lower().endswith(".mp4"):
         Image.open(jpg_path).convert("RGB").resize((1280, 720), Image.Resampling.LANCZOS).save(out_jpg, quality=94)
     return out_jpg
 
@@ -705,20 +731,22 @@ def compose_studio_video(script_data, wav_map, words_map, work_dir, output_mp4, 
         stderr=subprocess.DEVNULL,
     )
 
-    import random
+    hero_jpg = script_data.get("thumb_hero_path")
+    if not (hero_jpg and os.path.exists(hero_jpg)):
+        import random
 
-    thumb_candidates = [
-        os.path.join(BASE_DIR, "temp_gta6", "vault", fn)
-        for fn in ("img_17.jpg", "img_08.jpg", "img_26.jpg", "img_13.jpg", "img_07.jpg", "img_21.jpg")
-        if os.path.exists(os.path.join(BASE_DIR, "temp_gta6", "vault", fn))
-    ]
-    hero_jpg = random.choice(thumb_candidates) if thumb_candidates else (
-        block_jobs[0]["blk"].get("primary_img") if block_jobs else None
-    )
+        thumb_candidates = [
+            os.path.join(BASE_DIR, "temp_gta6", "vault", fn)
+            for fn in ("img_17.jpg", "img_08.jpg", "img_26.jpg", "img_13.jpg", "img_07.jpg", "img_21.jpg")
+            if os.path.exists(os.path.join(BASE_DIR, "temp_gta6", "vault", fn))
+        ]
+        hero_jpg = random.choice(thumb_candidates) if thumb_candidates else (
+            block_jobs[0]["blk"].get("primary_img") if block_jobs else None
+        )
     build_editorial_thumbnail(
         hero_jpg,
-        script_data.get("thumb_text", "ELES TRAVARAM AO VIVO!"),
-        script_data.get("thumb_subtext", "DAVY JONES & BISTECONE EM VICE CITY"),
+        script_data.get("thumb_text", "SEGREDOS ABSURDOS NO GTA 6!"),
+        script_data.get("thumb_subtext", ""),
         output_thumb_jpg,
     )
     real_dur = get_media_duration(output_mp4)
