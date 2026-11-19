@@ -419,24 +419,88 @@ def hunt_gta6_short_source(output_path=None):
         output_path = os.path.join(GTA6_TEMP_DIR, "viral_raw.mp4")
 
     research = research_gta6_references(kind="short")
-    v5_clips = []
+    v5_moms = []
     try:
         from producao.pesquisa_ao_vivo import pesquisar_do_zero  # noqa: WPS433
 
         pauta_v5, v5_moms = pesquisar_do_zero(FFMPEG_EXE)
-        if v5_moms:
-            research["v5_momentos"] = v5_moms
-            v5_clips = [m["clip"] for m in v5_moms if m.get("clip") and os.path.exists(m["clip"])]
-            if pauta_v5.get("pauta_short", {}).get("tema"):
-                research["chosen_angle"] = pauta_v5["pauta_short"]["tema"]
     except Exception as err_v5:
         print(f"[PESQUISA V5 SHORT] Aviso fallback: {err_v5}", flush=True)
 
-    mp4_vault, jpg_vault = sync_rockstar_gta6_vault(max_mp4=10, max_jpg=20)
-    used_ids = set(load_history().get("used_ids", [])) | set(load_gta6_history().get("used_ids", []))
+    # Trava Visual 1-para-1 (V5.2): usa SOMENTE o melhor clipe real validado (ou 2 do mesmo assunto),
+    # NUNCA mistura trailers antigos nem cenas aleatórias que não batem com o que o narrador vai falar!
+    valid_clips = [m for m in v5_moms if m.get("clip") and os.path.exists(m["clip"])]
+    if valid_clips:
+        valid_clips.sort(
+            key=lambda m: (
+                bool((m.get("validacao") or {}).get("bate_com_descricao")),
+                int((m.get("validacao") or {}).get("nota_visual", 0) or 0),
+            ),
+            reverse=True,
+        )
+        best_m = valid_clips[0]
+        same_topic = [m for m in valid_clips[1:] if m.get("assunto") == best_m.get("assunto")][:1]
+        chosen_moms = [best_m] + same_topic
 
+        # Constrói viral_raw.mp4 SOMENTE com o(s) clipe(s) validado(s) preservando 100% do áudio original!
+        segs = []
+        for idx_m, m in enumerate(chosen_moms):
+            seg_p = os.path.join(GTA6_TEMP_DIR, f"short_v5_exact_{idx_m}.mp4")
+            src = m["clip"]
+            d_clip = min(18.0 if len(chosen_moms) == 1 else 10.5, max(5.0, get_media_duration(src)))
+            r_aud = subprocess.run(
+                [FFMPEG_EXE, "-y", "-t", f"{d_clip:.2f}", "-i", src,
+                 "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1",
+                 "-map", "0:v:0", "-map", "0:a:0",
+                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
+                 "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k", seg_p],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            )
+            if r_aud.returncode != 0 or not os.path.exists(seg_p) or os.path.getsize(seg_p) < 50_000:
+                subprocess.run([
+                    FFMPEG_EXE, "-y", "-t", f"{d_clip:.2f}", "-i", src,
+                    "-f", "lavfi", "-t", f"{d_clip:.2f}", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                    "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1",
+                    "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k", seg_p,
+                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            segs.append(seg_p)
+
+        concat_txt = os.path.join(GTA6_TEMP_DIR, "short_v5_exact_concat.txt")
+        with open(concat_txt, "w", encoding="utf-8") as f:
+            for s in segs:
+                f.write(f"file '{os.path.abspath(s).replace(chr(92), '/')}'\n")
+        subprocess.run(
+            [FFMPEG_EXE, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt, "-c", "copy", output_path],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        dur = get_media_duration(output_path)
+        exact_desc = " | ".join(m.get("descricao_real", "") for m in chosen_moms)
+        research["chosen_angle"] = exact_desc
+        research["exact_clip_description"] = exact_desc
+        research["clip_channel"] = best_m.get("canal", "Criador")
+        uid = f"gta6_v5_{best_m.get('video_id', int(datetime.now(timezone.utc).timestamp()))}"
+        print(f"[SHORT V5.2 SYNC] Clipe exato travado: {best_m.get('canal')} | {exact_desc[:90]}", flush=True)
+        return {
+            "id": uid,
+            "source": best_m.get("canal", "GTA 6 Gameplay"),
+            "title": exact_desc[:120],
+            "description": exact_desc,
+            "duration": dur,
+            "views": 500_000,
+            "views_per_day": 250_000,
+            "age_days": 0.5,
+            "outlier_score": 4.5,
+            "url": f"https://www.youtube.com/watch?v={best_m.get('video_id', '')}",
+            "path": output_path,
+            "research_brief": research,
+            "vault_jpgs": [],
+        }
+
+    mp4_vault, jpg_vault = sync_rockstar_gta6_vault(max_mp4=10, max_jpg=20)
     dur = _build_rockstar_montage_clip(
-        mp4_vault, jpg_vault, output_path, angle_text=research["chosen_angle"], research_data=research, v5_clips=v5_clips
+        mp4_vault, jpg_vault, output_path, angle_text=research["chosen_angle"], research_data=research
     )
     uid = f"gta6_official_{int(datetime.now(timezone.utc).timestamp())}"
     return {
