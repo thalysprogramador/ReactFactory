@@ -751,16 +751,26 @@ def compose_studio_video(script_data, wav_map, words_map, work_dir, output_mp4, 
 
     hero_jpg = script_data.get("thumb_hero_path")
     if not (hero_jpg and os.path.exists(hero_jpg)):
-        import random
+        from producao.catalog import IMAGE_SEMANTIC_MAP, VAULT_DIR, _score_text_against_tags  # noqa: WPS433
 
-        thumb_candidates = [
-            os.path.join(BASE_DIR, "temp_gta6", "vault", fn)
-            for fn in ("img_17.jpg", "img_08.jpg", "img_26.jpg", "img_13.jpg", "img_07.jpg", "img_21.jpg")
-            if os.path.exists(os.path.join(BASE_DIR, "temp_gta6", "vault", fn))
-        ]
-        hero_jpg = random.choice(thumb_candidates) if thumb_candidates else (
-            block_jobs[0]["blk"].get("primary_img") if block_jobs else None
-        )
+        thumb_query = (
+            f"{script_data.get('long_title', '')} {script_data.get('thumb_text', '')} "
+            f"{script_data.get('thumb_subtext', '')}"
+        ).lower()
+        scored_imgs = []
+        for fn, meta in IMAGE_SEMANTIC_MAP.items():
+            fp = os.path.join(VAULT_DIR, fn)
+            if os.path.exists(fp):
+                sc = _score_text_against_tags(thumb_query, meta["tags"])
+                scored_imgs.append((sc, fp, meta["subject"]))
+        scored_imgs.sort(key=lambda x: x[0], reverse=True)
+        if scored_imgs and scored_imgs[0][0] > 0:
+            hero_jpg = scored_imgs[0][1]
+            print(f"[THUMB SEMÂNTICA V5.5] Selecionada por relevância ({scored_imgs[0][0]} pts): {os.path.basename(hero_jpg)} ({scored_imgs[0][2]})", flush=True)
+        else:
+            hero_jpg = (block_jobs[0]["blk"].get("primary_img") if block_jobs else None) or (
+                scored_imgs[0][1] if scored_imgs else None
+            )
     build_editorial_thumbnail(
         hero_jpg,
         script_data.get("thumb_text", "SEGREDOS ABSURDOS NO GTA 6!"),
