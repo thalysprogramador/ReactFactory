@@ -353,39 +353,49 @@ def _try_tiktok_gta6_clip(output_path, used_ids):
     return None
 
 
-def _build_rockstar_montage_clip(mp4_vault, jpg_vault, output_path, bgm_path=None, angle_text="", research_data=None):
-    """Monta um clipe dinâmico multi-cenas (~24s) 100% em VÍDEO REAL (Lives Davy Jones/Bistecone + Gameplay GTA 6)."""
+def _build_rockstar_montage_clip(mp4_vault, jpg_vault, output_path, bgm_path=None, angle_text="", research_data=None, v5_clips=None):
+    """Monta um clipe dinâmico multi-cenas (~24s) 100% em VÍDEO REAL COM ÁUDIO ORIGINAL das cenas pesquisadas."""
     from producao.catalog import select_semantic_assets  # noqa: WPS433
-    from producao.sound_designer import fetch_dynamic_bgm_for_mood  # noqa: WPS433
 
     sem = select_semantic_assets(
         [
-            {"narration": "live davy jones bistecone gameplay " + angle_text, "headline": angle_text, "callout": "GTA 6"},
-            {"narration": "bistecone davy jones saninplay vice city lucia jason carros", "headline": "LEONIDA"},
+            {"narration": angle_text, "headline": angle_text, "callout": "GTA 6"},
+            {"narration": "gameplay bugs segredos vice city lucia jason", "headline": "LEONIDA"},
         ],
         prefer_horizontal=False,
         research_data=research_data,
         ffmpeg_exe=FFMPEG_EXE,
     )
-    sem_vids = []
+    sem_vids = list(v5_clips or [])
     for item in sem:
         for v in item.get("video_clips", []):
             if v not in sem_vids and os.path.exists(v):
                 sem_vids.append(v)
 
     picks = sem_vids + [p for p in mp4_vault if p not in sem_vids]
-    chosen = picks[:7] if picks else list(mp4_vault)[:6]
+    chosen = picks[:6] if picks else list(mp4_vault)[:5]
     segs = []
     for i, src in enumerate(chosen):
         seg_p = os.path.join(GTA6_TEMP_DIR, f"short_cut_{i}.mp4")
-        d = min(3.8, max(2.8, get_media_duration(src)))
-        # Mantém proporção widescreen 1920x1080 original (ZERO ultra-zoom e 100% vídeo real em movimento!)
-        subprocess.run([
-            FFMPEG_EXE, "-y", "-t", f"{d:.2f}", "-i", src,
-            "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,setsar=1",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-an",
-            seg_p,
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        d = min(4.2, max(3.0, get_media_duration(src)))
+        # Mantém proporção 1920x1080 original SEM CORTE e PRESERVA ÁUDIO ORIGINAL (ou anullsrc se o clipe for mudo)
+        r_has_aud = subprocess.run(
+            [FFMPEG_EXE, "-y", "-t", f"{d:.2f}", "-i", src,
+             "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1",
+             "-map", "0:v:0", "-map", "0:a:0",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k", seg_p],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+        if r_has_aud.returncode != 0 or not os.path.exists(seg_p) or os.path.getsize(seg_p) < 50_000:
+            subprocess.run([
+                FFMPEG_EXE, "-y", "-t", f"{d:.2f}", "-i", src,
+                "-f", "lavfi", "-t", f"{d:.2f}", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1",
+                "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k", seg_p,
+            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         segs.append(seg_p)
 
     concat_txt = os.path.join(GTA6_TEMP_DIR, "short_concat.txt")
@@ -393,33 +403,11 @@ def _build_rockstar_montage_clip(mp4_vault, jpg_vault, output_path, bgm_path=Non
         for s in segs:
             f.write(f"file '{os.path.abspath(s).replace(chr(92), '/')}'\n")
 
-    silent_mp4 = os.path.join(GTA6_TEMP_DIR, "short_silent_montage.mp4")
     subprocess.run([
         FFMPEG_EXE, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt,
-        "-c", "copy", silent_mp4,
+        "-c", "copy", output_path,
     ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    dur = get_media_duration(silent_mp4)
-    if not bgm_path:
-        try:
-            bgm_path, _ = fetch_dynamic_bgm_for_mood("urban", FFMPEG_EXE)
-        except Exception:
-            bgm_path = None
-    bgm = bgm_path if (bgm_path and os.path.exists(bgm_path)) else os.path.join(BASE_DIR, "assets", "bgm_gta_synth.mp3")
-    if os.path.exists(bgm):
-        subprocess.run([
-            FFMPEG_EXE, "-y", "-i", silent_mp4, "-stream_loop", "-1", "-i", bgm,
-            "-t", f"{dur:.2f}",
-            "-filter_complex", "[1:a]volume=0.85,aformat=sample_rates=48000:channel_layouts=stereo[a]",
-            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            output_path,
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    else:
-        subprocess.run([
-            FFMPEG_EXE, "-y", "-i", silent_mp4, "-f", "lavfi", "-t", f"{dur:.2f}", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-            "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", output_path,
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return dur
+    return get_media_duration(output_path)
 
 
 def hunt_gta6_short_source(output_path=None):
@@ -431,20 +419,24 @@ def hunt_gta6_short_source(output_path=None):
         output_path = os.path.join(GTA6_TEMP_DIR, "viral_raw.mp4")
 
     research = research_gta6_references(kind="short")
+    v5_clips = []
+    try:
+        from producao.pesquisa_ao_vivo import pesquisar_do_zero  # noqa: WPS433
+
+        pauta_v5, v5_moms = pesquisar_do_zero(FFMPEG_EXE)
+        if v5_moms:
+            research["v5_momentos"] = v5_moms
+            v5_clips = [m["clip"] for m in v5_moms if m.get("clip") and os.path.exists(m["clip"])]
+            if pauta_v5.get("pauta_short", {}).get("tema"):
+                research["chosen_angle"] = pauta_v5["pauta_short"]["tema"]
+    except Exception as err_v5:
+        print(f"[PESQUISA V5 SHORT] Aviso fallback: {err_v5}", flush=True)
+
     mp4_vault, jpg_vault = sync_rockstar_gta6_vault(max_mp4=10, max_jpg=20)
     used_ids = set(load_history().get("used_ids", [])) | set(load_gta6_history().get("used_ids", []))
 
-    # Alterna 50/50 entre clipe real do TikTok gamer BR e montagem oficial Rockstar para variar formato!
-    prefer_tiktok = (len(load_gta6_history().get("posts", [])) % 2 == 1)
-    if prefer_tiktok:
-        tt = _try_tiktok_gta6_clip(output_path, used_ids)
-        if tt:
-            tt["research_brief"] = research
-            tt["vault_jpgs"] = jpg_vault
-            return tt
-
     dur = _build_rockstar_montage_clip(
-        mp4_vault, jpg_vault, output_path, angle_text=research["chosen_angle"], research_data=research
+        mp4_vault, jpg_vault, output_path, angle_text=research["chosen_angle"], research_data=research, v5_clips=v5_clips
     )
     uid = f"gta6_official_{int(datetime.now(timezone.utc).timestamp())}"
     return {
