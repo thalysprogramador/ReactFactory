@@ -90,17 +90,15 @@ def generate_react_script(video_path, original_title="Viral Video", original_des
 
     ref_block = ""
     if research_brief:
-        top_titles = "\n".join(
-            f"- ({r.get('views', 0):,} views) {r.get('channel', '')}: {r.get('title', '')}"
-            for r in (research_brief.get("top_references") or [])[:6]
-        )
+        exact_desc = research_brief.get("exact_clip_description") or original_title
+        clip_ch = research_brief.get("clip_channel") or ""
         ref_block = f"""
-TEMA OBRIGATÓRIO DO CANAL (JOGO LANÇADO & LIVES BOMBANDO AGORA): **GTA 6 (Grand Theft Auto VI)**
-Ângulo específico deste corte: "{research_brief.get('chosen_angle', original_title)}"
-Lives e vídeos de criadores grandes bombando AGORA (Davy Jones / Gameplayrj, Bistecone, SanInPlay, Flow Games):
-{top_titles}
-Destaques das lives de hoje: {research_brief.get('grounding_notes', '')[:450]}
-Missão neste Short (meta: 50.000 a 1M+ views, estilo referência viral de curiosidades e cortes de GTA 6): criar um corte eletrizante sobre o que os streamers (Davy Jones, Bistecone, SanInPlay) acabaram de descobrir jogando GTA 6 ao vivo ou uma função/segredo absurdo da gameplay real!
+REGRA ABSOLUTA DE SINCRONIZAÇÃO VISUAL (V5.2):
+O vídeo em anexo (8 frames + áudio real) mostra EXATAMENTE esta cena do GTA 6:
+"{exact_desc}" (fonte: {clip_ch or 'gameplay real'}).
+- FALE EXCLUSIVAMENTE SOBRE O QUE ESTÁ LITERALMENTE ACONTECENDO NOS FRAMES E NO ÁUDIO EM ANEXO!
+- PROIBIDO inventar ou mencionar assuntos que NÃO aparecem nesses frames (ex: NÃO fale de mapa, celular, polícia ou Davy Jones se isso não estiver literalmente visível na cena em anexo!).
+- O protagonista do Short é O JOGO (o bug, detalhe, segredo ou mecânica que aparece na tela). Cite o criador apenas de forma natural se aparecer/fizer sentido.
 """
 
     prompt = f"""Você é um criador gamer brasileiro TOP 1% de YouTube Shorts focado em BATER 30K–1M+ DE VIEWS (meta: swipe rate > 84%, retenção média > 115% em loop e explosão de comentários) + CONTEÚDO TRANSFORMATIVO autêntico.
