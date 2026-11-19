@@ -485,22 +485,80 @@ def compose_react_short(
 
     sfx_pop_path = ensure_pop_sfx()
     outro_rel_p2 = max(0.0, (ms_outro - ms_part2) / 1000.0)
-    filter_complex = (
-        f"[0:a]volume=1.22[a_hook];"
-        f"[1:a]adelay={ms_part1}|{ms_part1},volume=0.88[a_vp1];"
-        f"[2:a]adelay={ms_inter}|{ms_inter},volume=1.22[a_inter];"
-        f"[3:a]volume='if(gte(t,{outro_rel_p2:.2f}),0.22,0.88)':eval=frame,adelay={ms_part2}|{ms_part2}[a_vp2];"
-        f"[4:a]adelay={ms_outro}|{ms_outro},volume=1.22[a_outro];"
-        f"[5:a]volume=0.30[a_whoosh];"
-        f"[6:a]adelay={ms_inter}|{ms_inter},volume=0.34[a_freeze];"
-        f"[7:a]adelay={ms_part1}|{ms_part1},volume=0.26[a_pop1];"
-        f"[8:a]adelay={ms_outro}|{ms_outro},volume=0.26[a_pop2];"
-        f"[a_hook][a_vp1][a_inter][a_vp2][a_outro][a_whoosh][a_freeze][a_pop1][a_pop2]amix=inputs=9:duration=longest:dropout_transition=0:normalize=0,volume=0.96[a_final]"
-    )
+    # Agente Sound Designer Autônomo (V5.3): seleciona e baixa uma trilha licenciada única para o clima deste Short!
+    bgm_short_file = None
+    try:
+        from producao.sound_designer import fetch_dynamic_bgm_for_mood  # noqa: WPS433
 
+        txt_mood = (
+            f"{script_data.get('reaction_mood', '')} {script_data.get('headline_top', '')} "
+            f"{script_data.get('hook_text', '')} {script_data.get('interrupt_text', '')}"
+        ).lower()
+        if any(k in txt_mood for k in ("segredo", "mistério", "misterio", "easter", "escondido", "pensativo")):
+            short_mood = "mystery"
+        elif any(k in txt_mood for k in ("polícia", "policia", "tabu", "tigre", "tiroteio", "choque", "chocado", "perigo", "assalto")):
+            short_mood = "tension"
+        elif any(k in txt_mood for k in ("bug", "glitch", "fail", "rindo", "engraçado", "bizarro", "louco")):
+            short_mood = "urban"
+        elif any(k in txt_mood for k in ("história", "historia", "lucia", "jason", "prisão", "prisao")):
+            short_mood = "story"
+        else:
+            short_mood = "synth"
+
+        bgm_short_file, bgm_credit = fetch_dynamic_bgm_for_mood(short_mood, FFMPEG_EXE)
+        print(f"[SOUND DESIGNER SHORT] Clima='{short_mood}' | Trilha='{bgm_credit.get('title')}' ({bgm_credit.get('license')})", flush=True)
+    except Exception as e_bgm:
+        print(f"[SOUND DESIGNER SHORT] Aviso fallback BGM: {e_bgm}", flush=True)
+
+    fade_out_bgm = max(0.0, t_total - 0.45)
     mixed_audio = os.path.join(TEMP_DIR, "mixed_master.wav")
-    subprocess.run(
-        [
+
+    if bgm_short_file and os.path.exists(bgm_short_file):
+        filter_complex = (
+            f"[0:a]volume=1.24[a_hook];"
+            f"[1:a]adelay={ms_part1}|{ms_part1},volume=0.84[a_vp1];"
+            f"[2:a]adelay={ms_inter}|{ms_inter},volume=1.24[a_inter];"
+            f"[3:a]volume='if(gte(t,{outro_rel_p2:.2f}),0.22,0.84)':eval=frame,adelay={ms_part2}|{ms_part2}[a_vp2];"
+            f"[4:a]adelay={ms_outro}|{ms_outro},volume=1.24[a_outro];"
+            f"[5:a]volume=0.28[a_whoosh];"
+            f"[6:a]adelay={ms_inter}|{ms_inter},volume=0.32[a_freeze];"
+            f"[7:a]adelay={ms_part1}|{ms_part1},volume=0.24[a_pop1];"
+            f"[8:a]adelay={ms_outro}|{ms_outro},volume=0.24[a_pop2];"
+            f"[9:a]atrim=0:{t_total:.2f},afade=t=in:st=0:d=0.25,afade=t=out:st={fade_out_bgm:.2f}:d=0.45,volume=0.16[a_bgm];"
+            f"[a_hook][a_vp1][a_inter][a_vp2][a_outro][a_whoosh][a_freeze][a_pop1][a_pop2][a_bgm]"
+            f"amix=inputs=10:duration=longest:dropout_transition=0:normalize=0,volume=0.96[a_final]"
+        )
+        ff_mix = [
+            FFMPEG_EXE, "-y",
+            "-i", hook_audio_wav,
+            "-i", v_aud_p1,
+            "-i", interrupt_audio_wav,
+            "-i", v_aud_p2,
+            "-i", outro_audio_wav,
+            "-i", sfx_whoosh_path,
+            "-i", sfx_freeze_path,
+            "-i", sfx_pop_path,
+            "-i", sfx_pop_path,
+            "-stream_loop", "-1", "-i", bgm_short_file,
+            "-filter_complex", filter_complex,
+            "-map", "[a_final]",
+            "-t", f"{t_total:.2f}",
+            mixed_audio,
+        ]
+    else:
+        filter_complex = (
+            f"[0:a]volume=1.22[a_hook];"
+            f"[1:a]adelay={ms_part1}|{ms_part1},volume=0.88[a_vp1];"
+            f"[2:a]adelay={ms_inter}|{ms_inter},volume=1.22[a_inter];"
+            f"[3:a]volume='if(gte(t,{outro_rel_p2:.2f}),0.22,0.88)':eval=frame,adelay={ms_part2}|{ms_part2}[a_vp2];"
+            f"[4:a]adelay={ms_outro}|{ms_outro},volume=1.22[a_outro];"
+            f"[5:a]volume=0.30[a_whoosh];"
+            f"[6:a]adelay={ms_inter}|{ms_inter},volume=0.34[a_freeze];"
+            f"[7:a]adelay={ms_part1}|{ms_part1},volume=0.26[a_pop1];"
+            f"[8:a]adelay={ms_outro}|{ms_outro},volume=0.26[a_pop2];"
+            f"[a_hook][a_vp1][a_inter][a_vp2][a_outro][a_whoosh][a_freeze][a_pop1][a_pop2]amix=inputs=9:duration=longest:dropout_transition=0:normalize=0,volume=0.96[a_final]"
+        )
+        ff_mix = [
             FFMPEG_EXE, "-y",
             "-i", hook_audio_wav,
             "-i", v_aud_p1,
@@ -515,11 +573,9 @@ def compose_react_short(
             "-map", "[a_final]",
             "-t", f"{t_total:.2f}",
             mixed_audio,
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+        ]
+
+    subprocess.run(ff_mix, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     subprocess.run(
         [
