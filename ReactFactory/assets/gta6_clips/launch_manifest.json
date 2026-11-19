@@ -1,0 +1,156 @@
+{
+  "launch_v5_m7.mp4": {
+    "category": "detalhe",
+    "channel": "Gameplayrj",
+    "video_id": "chge7GrCNc0",
+    "desc": "Lucia observa o pátio da prisão através de uma janela gradeada durante uma cena do trailer de GTA VI.",
+    "regiao": "vice_city",
+    "has_audio": true
+  },
+  "launch_v5_m8.mp4": {
+    "category": "segredo",
+    "channel": "Gameplayrj",
+    "video_id": "chge7GrCNc0",
+    "desc": "Uma policial atende uma ocorrência e solicita assistência social ao encontrar um bebê chorando em um ambiente doméstico.",
+    "regiao": "vice_city",
+    "has_audio": true
+  },
+  "launch_v5_m1.mp4": {
+    "category": "mecanica",
+    "channel": "Davy Jones GTA 6 and Gameplayrj",
+    "video_id": "0yhO15vKSRs",
+    "desc": "Um streamer introduz o vídeo seguido por cenas de gameplay de direção em uma rodovia costeira com palmeiras e vista para um porto.",
+    "regiao": "vice_city",
+    "has_audio": true
+  },
+  "launch_v5_m11.mp4": {
+    "category": "detalhe",
+    "channel": "Gameplayrj",
+    "video_id": "chge7GrCNc0",
+    "desc": "Um hidroavião sobrevoa um arquipélago tropical durante o pôr do sol.",
+    "regiao": "leonida_keys",
+    "has_audio": true
+  },
+  "launch_v5_m2.mp4": {
+    "category": "detalhe",
+    "channel": "Davy Jones GTA 6 and Gameplayrj",
+    "video_id": "0yhO15vKSRs",
+    "desc": "Uma personagem feminina realizando exercícios de supino em uma academia.",
+    "regiao": "vice_city",
+    "has_audio": true
+  },
+  "launch_v5_m3.mp4": {
+    "category": "mecanica",
+    "channel": "Davy Jones GTA 6 and Gameplayrj",
+    "video_id": "0yhO15vKSRs",
+    "desc": "Imagens do trailer de GTA VI mostrando um encontro de carros e o skyline de Vice City intercaladas com um apresentador.",
+    "regiao": "vice_city",
+    "has_audio": true
+  },
+  "launch_v5_m10.mp4": {
+    "category": "detalhe",
+    "channel": "Gameplayrj",
+    "video_id": "chge7GrCNc0",
+    "desc": "O protagonista encontra um tigre preso em uma jaula dentro de uma propriedade rural.",
+    "regiao": "nenhuma",
+    "has_audio": true
+  },
+  "launch_bist_boat.mp4": {
+    "category": "agua",
+    "channel": "Bistecone",
+    "video_id": "gB1PxCf0YHU",
+    "desc": "Gameplay de um jogo de mundo aberto, possivelmente GTA 6, onde o jogador pilota um barco em águas claras com uma ponte ao fundo, sob um céu ensolarado, com um streamer na tela.",
+    "tags": [
+      "barco",
+      "agua",
+      "gameplay",
+      "streamer"
+    ],
+    "regiao": "leonida_keys",
+    "has_audio": true
+  },
+  "launch_bist_mission.mp4": {
+    "category": "missao",
+    "channel": "Bistecone",
+    "video_id": "gB1PxCf0YHU",
+    "desc": "Um personagem está agachado perto de um barco virado em uma área externa com detritos, com elementos de interface do jogo e uma facecam de streamer visíveis.",
+    "tags": [
+      "personagem",
+      "agachado",
+      "barco",
+      "gameplay"
+    ],
+    "regiao": "vice_city",
+    "has_audio": true
+  },
+  "launch_bist_drive.mp4": {
+    "category": "carros",
+    "channel": "BisteconeLive",
+    "video_id": "Q9ZqVAdtASE",
+    "desc": "As três imagens mostram cenas de gameplay de GTA 6, incluindo diálogos com uma mulher em diferentes vestimentas (uniforme laranja e roupas casuais) e ambientes variados, como um interior e um beco.",
+    "tags": [
+      "gameplay",
+      "dialogo",
+      "mulher",
+      "cenarios"
+    ],
+    "regiao": "vice_city",
+    "has_audio": true
+  },
+  "launch_bist_city.mp4": {
+    "category": "mapa",
+    "channel": "BisteconeLive",
+    "video_id": "Q9ZqVAdtASE",
+    "desc": "Um personagem em terceira pessoa se aproxima de um caminhão enferrujado com o capô aberto em uma área rural, enquanto um streamer joga.",
+    "tags": [
+      "gameplay",
+      "personagem",
+      "caminhao",
+      "rural"
+    ],
+    "regiao": "vice_city",
+    "has_audio": true
+  },
+  "launch_san_beach.mp4": {
+    "category": "praia",
+    "channel": "SanInPlay",
+    "video_id": "SXmmcmKOzuc",
+    "desc": "Um veículo utilitário vermelho está dirigindo em uma praia arenosa com pessoas, guarda-sóis e edifícios ao fundo, ao lado do oceano.",
+    "tags": [
+      "gta",
+      "praia",
+      "veiculo",
+      "gameplay"
+    ],
+    "regiao": "vice_city",
+    "has_audio": true
+  },
+  "launch_san_ocean.mp4": {
+    "category": "agua",
+    "channel": "SanInPlay",
+    "video_id": "SXmmcmKOzuc",
+    "desc": "Um personagem dirige um veículo utilitário na areia de uma praia com o oceano e prédios ao fundo, em gameplay de GTA 6.",
+    "tags": [
+      "GTA 6",
+      "praia",
+      "veículo",
+      "gameplay"
+    ],
+    "regiao": "leonida_keys",
+    "has_audio": true
+  },
+  "launch_davy_street.mp4": {
+    "category": "exploracao",
+    "channel": "Gameplayrj",
+    "video_id": "chge7GrCNc0",
+    "desc": "Uma sequência de gameplay mostra um personagem interagindo com um ambiente rural, incluindo um homem caído, uma parede e uma jaula com um tigre, com legendas em português e a facecam de um streamer.",
+    "tags": [
+      "gameplay",
+      "personagem",
+      "tigre",
+      "legendas"
+    ],
+    "regiao": "vice_city",
+    "has_audio": true
+  }
+}
