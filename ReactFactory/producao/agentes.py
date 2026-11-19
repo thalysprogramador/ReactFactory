@@ -230,8 +230,16 @@ def _get_whisper():
     return _WHISPER_MODEL
 
 
-def extract_word_timestamps(wav_path, ffmpeg_exe):
-    """Extrai timestamps exatos em segundos de cada palavra falada no WAV usando faster-whisper."""
+def extract_word_timestamps(wav_path, ffmpeg_exe, reference_text=None):
+    """
+    Alinhamento Forçado Texto-Áudio (V5.1):
+    - Usa faster-whisper para detectar o início e fim exatos da fala no WAV (removendo silêncios iniciais/finais)
+      e distribui as PALAVRAS EXATAS do roteiro (`reference_text`) com peso silábico/pontuação,
+      garantindo 100% de ortografia correta em PT-BR (zero erros em nomes próprios como GTA 6, Leonida, Rockstar!).
+    """
+    speech_start = 0.05
+    speech_end = None
+    whisper_words = []
     try:
         r = subprocess.run(
             [ffmpeg_exe, "-i", wav_path, "-f", "s16le", "-ac", "1", "-ar", "16000", "-"],
@@ -239,19 +247,49 @@ def extract_word_timestamps(wav_path, ffmpeg_exe):
             check=True,
         )
         audio_np = np.frombuffer(r.stdout, dtype=np.int16).astype(np.float32) / 32768.0
-        if len(audio_np) < 800:
-            return []
-        segs, _ = _get_whisper().transcribe(audio_np, language="pt", word_timestamps=True)
-        words = []
-        for s in segs:
-            for w in s.words or []:
-                clean_w = (w.word or "").strip()
-                if clean_w:
-                    words.append({"w": clean_w, "s": round(float(w.start), 2), "e": round(float(w.end), 2)})
-        return words
+        if len(audio_np) >= 800:
+            segs, _ = _get_whisper().transcribe(audio_np, language="pt", word_timestamps=True)
+            for s in segs:
+                for w in s.words or []:
+                    clean_w = (w.word or "").strip()
+                    if clean_w:
+                        whisper_words.append({"w": clean_w, "s": float(w.start), "e": float(w.end)})
+            if whisper_words:
+                speech_start = max(0.0, whisper_words[0]["s"])
+                speech_end = whisper_words[-1]["e"]
     except Exception as err:
-        print(f"[WHISPER] Aviso alinhamento ({err}) -> usando divisão proporcional.", flush=True)
-        return []
+        print(f"[WHISPER] Aviso detecção envelope ({err}) -> usando duração do WAV.", flush=True)
+
+    # Se temos o texto exato do roteiro, alinhamos as palavras exatas no envelope real da fala!
+    if reference_text and reference_text.strip():
+        raw_words = [w.strip() for w in reference_text.split() if w.strip()]
+        if raw_words:
+            if speech_end is None or speech_end <= speech_start + 0.3:
+                from voice_and_avatar import get_audio_duration  # noqa: WPS433
+
+                speech_end = max(speech_start + 1.0, get_audio_duration(wav_path) - 0.12)
+
+            # Peso proporcional ao tamanho da palavra + pausa natural de pontuação (., !, ?, :)
+            weights = []
+            for w in raw_words:
+                base_w = max(2.2, float(len(w.strip(".,!?;:\"'()"))))
+                if w.endswith((".", "!", "?")):
+                    base_w += 3.8
+                elif w.endswith((",", ";", ":")):
+                    base_w += 1.8
+                weights.append(base_w)
+
+            total_w = sum(weights)
+            span = max(0.5, speech_end - speech_start)
+            aligned = []
+            cursor = speech_start
+            for w, wt in zip(raw_words, weights):
+                dur_w = span * (wt / total_w)
+                aligned.append({"w": w, "s": round(cursor, 2), "e": round(cursor + dur_w, 2)})
+                cursor += dur_w
+            return aligned
+
+    return [{"w": it["w"], "s": round(it["s"], 2), "e": round(it["e"], 2)} for it in whisper_words]
 
 
 def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="Orus"):
@@ -337,7 +375,7 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
 
         wav_map[bid] = out_wav
         dur = get_audio_duration(out_wav)
-        w_ts = extract_word_timestamps(out_wav, ffmpeg_exe)
+        w_ts = extract_word_timestamps(out_wav, ffmpeg_exe, reference_text=blk["narration"])
         if not w_ts:
             # Fallback proporcional se Whisper falhar
             raw_words = blk["narration"].split()
