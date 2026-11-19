@@ -240,14 +240,75 @@ def harvest_live_influencer_clips(research_data, ffmpeg_exe, max_new=6):
 
 
 def extract_real_trailer_clips(ffmpeg_exe):
-    """Retorna todos os clipes 1080p curados (Lives Davy Jones/Bistecone + Gameplay GTA 6) + colheita diária."""
-    curated = [
-        os.path.join(CLIPS_CURATED_DIR, fn)
-        for fn in sorted(VIDEO_SEMANTIC_MAP.keys())
-        if os.path.exists(os.path.join(CLIPS_CURATED_DIR, fn))
-    ]
-    inf = sorted(glob.glob(os.path.join(INFLUENCER_CLIPS_DIR, "inf_*.mp4")))
-    return curated + [p for p in inf if not is_sticker_mask_video(p)]
+    """Retorna todos os clipes curados + launch_manifest + colheita diária (sem cartelas de pré-venda)."""
+    cat = get_all_verified_clip_catalog()
+    return [v["path"] for v in cat.values() if os.path.exists(v["path"])]
+
+
+def get_all_verified_clip_catalog(v5_momentos=None):
+    """
+    Catálogo Mestre V6 de Clipes Reais Validados (1-para-1 com descrição visual exata):
+    1. Prioridade 1: Momentos recém-pesquisados e validados ao vivo (`v5_momentos`, com áudio original).
+    2. Prioridade 2: Clipes reais do lançamento validados em `assets/gta6_clips/launch_manifest.json` (com áudio original).
+    3. Prioridade 3: Clipes 1080p de gameplay/cenas curadas em `VIDEO_SEMANTIC_MAP` (excluindo cartelas de pré-venda e câmera estática).
+    """
+    catalog = {}
+
+    # 1. Momentos ao vivo recém-baixados nesta execução
+    for m in v5_momentos or []:
+        cp = m.get("clip")
+        if cp and os.path.exists(cp):
+            cid = f"live_{m.get('mid', os.path.basename(cp))}"
+            catalog[cid] = {
+                "path": cp,
+                "desc": m.get("descricao_real") or m.get("o_que_acontece") or "Gameplay real de GTA 6",
+                "channel": m.get("canal", "Criador"),
+                "regiao": (m.get("validacao") or {}).get("regiao", "vice_city"),
+                "tags": [m.get("assunto", "gameplay"), "gta6", "live"],
+                "has_audio": True,
+                "priority": 1,
+            }
+
+    # 2. Clipes reais do dia do lançamento validados visualmente (launch_manifest.json)
+    manifest_p = os.path.join(CLIPS_CURATED_DIR, "launch_manifest.json")
+    if os.path.exists(manifest_p):
+        try:
+            mdata = json.load(open(manifest_p, encoding="utf-8"))
+            for fn, info in mdata.items():
+                cp = os.path.join(CLIPS_CURATED_DIR, fn)
+                if os.path.exists(cp):
+                    cid = os.path.splitext(fn)[0]
+                    catalog[cid] = {
+                        "path": cp,
+                        "desc": info.get("desc", "Gameplay real de GTA 6"),
+                        "channel": info.get("channel", "Criador"),
+                        "regiao": info.get("regiao", "vice_city"),
+                        "tags": info.get("tags", [info.get("category", "gameplay"), "gta6"]),
+                        "has_audio": bool(info.get("has_audio", True)),
+                        "priority": 2,
+                    }
+        except Exception:
+            pass
+
+    # 3. Clipes 1080p verificados quadro-a-quadro (exclui telas de pré-venda e câmera falando sem gameplay)
+    skip_files = {"gta6_vid_10.mp4", "gta6_vid_28.mp4", "gta6_live_flowgames_01.mp4"}
+    for fn, meta in VIDEO_SEMANTIC_MAP.items():
+        if fn in skip_files:
+            continue
+        cp = os.path.join(CLIPS_CURATED_DIR, fn)
+        if os.path.exists(cp):
+            cid = os.path.splitext(fn)[0]
+            catalog[cid] = {
+                "path": cp,
+                "desc": meta["desc"],
+                "channel": "GTA 6 Gameplay",
+                "regiao": "vice_city",
+                "tags": meta["tags"],
+                "has_audio": False,
+                "priority": 3,
+            }
+
+    return catalog
 
 
 def _score_text_against_tags(text_low, tags):
