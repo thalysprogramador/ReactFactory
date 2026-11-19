@@ -26,7 +26,37 @@ from producao.gemini_client import gemini_text
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESEARCH_DIR = os.path.join(BASE_DIR, "temp_gta6", "pesquisa_v5")
 HISTORY_V5_FILE = os.path.join(BASE_DIR, "data", "history_v5.json")
+COOKIES_PATH = os.path.join(BASE_DIR, "temp_gta6", "yt_cookies_v5.txt")
 YTDLP = [sys.executable, "-m", "yt_dlp", "--no-warnings", "--quiet"]
+
+
+def _ensure_cookies_file():
+    """Decodifica YOUTUBE_COOKIES_B64 (secret do GitHub Actions) para liberar downloads/legendas em IPs de nuvem."""
+    if os.path.exists(COOKIES_PATH) and os.path.getsize(COOKIES_PATH) > 100:
+        return COOKIES_PATH
+    b64 = (os.environ.get("YOUTUBE_COOKIES_B64") or "").strip()
+    if not b64:
+        local_ck = os.path.join(os.path.dirname(BASE_DIR), "_render_secrets", "YOUTUBE_COOKIES_B64.txt")
+        if os.path.exists(local_ck):
+            b64 = open(local_ck, "r", encoding="utf-8").read().strip()
+    if b64:
+        try:
+            os.makedirs(os.path.dirname(COOKIES_PATH), exist_ok=True)
+            with open(COOKIES_PATH, "wb") as f:
+                f.write(base64.b64decode(b64))
+            return COOKIES_PATH
+        except Exception:
+            pass
+    return None
+
+
+def _ytdlp_cmd(with_cookies=True):
+    cmd = list(YTDLP) + ["--extractor-args", "youtube:player_client=android_vr,tv,web,mweb"]
+    if with_cookies:
+        ck = _ensure_cookies_file()
+        if ck:
+            cmd += ["--cookies", ck]
+    return cmd
 
 
 def _load_v5_history():
@@ -167,9 +197,14 @@ def baixar_transcricoes(cands, max_videos=14, max_chars=26000):
         base = os.path.join(RESEARCH_DIR, f"sub_{c['id']}")
         for f in glob.glob(base + "*"):
             os.remove(f)
-        _run(YTDLP + ["--skip-download", "--write-auto-subs", "--write-subs", "--sub-langs", "pt.*,pt,en.*,en",
-                      "--sub-format", "vtt", "-o", base, f"https://www.youtube.com/watch?v={c['id']}"], timeout=50)
-        files = sorted(glob.glob(base + "*.vtt"), key=lambda p: (".pt" not in p, len(p)))
+        for use_ck in (True, False):
+            _run(_ytdlp_cmd(with_cookies=use_ck) + [
+                "--skip-download", "--write-auto-subs", "--write-subs", "--sub-langs", "pt.*,pt,en.*,en",
+                "--sub-format", "vtt", "-o", base, f"https://www.youtube.com/watch?v={c['id']}"
+            ], timeout=45)
+            files = sorted(glob.glob(base + "*.vtt"), key=lambda p: (".pt" not in p, len(p)))
+            if files:
+                break
         if not files:
             return None
         txt = "\n".join(_vtt_to_lines(open(files[0], encoding="utf-8", errors="replace").read()))
@@ -209,7 +244,7 @@ def capturar_lives(cands, ffmpeg_exe, max_lives=3, secs=40):
     lives = [c for c in cands if c["live"]][:max_lives]
     caps = []
     for c in lives:
-        r = _run(YTDLP + ["-g", "-f", "best[height<=720]/best", f"https://www.youtube.com/watch?v={c['id']}"], timeout=30)
+        r = _run(_ytdlp_cmd(with_cookies=True) + ["-g", "-f", "best[height<=720]/best", f"https://www.youtube.com/watch?v={c['id']}"], timeout=30)
         url = (r.stdout.strip().splitlines() or [""])[0] if r and r.stdout else ""
         if not url:
             continue
@@ -300,11 +335,28 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
             e = float(m.get("end", s + 15)) + pad
             e = min(e, s + 24)
             raw = dst + ".raw.mp4"
-            _run(YTDLP + ["--ffmpeg-location", ffmpeg_exe, "-f",
-                          "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b",
-                          "--download-sections", f"*{s:.0f}-{e:.0f}", "--force-keyframes-at-cuts",
-                          "--merge-output-format", "mp4", "-o", raw, f"https://www.youtube.com/watch?v={vid}"], timeout=120)
-            if not os.path.exists(raw):
+            last_err = ""
+            for use_ck, fmt in (
+                (True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
+                (False, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/b[height<=720]/b"),
+                (False, "b[height<=720]/b"),
+            ):
+                if os.path.exists(raw):
+                    try:
+                        os.remove(raw)
+                    except OSError:
+                        pass
+                r_dl = _run(_ytdlp_cmd(with_cookies=use_ck) + [
+                    "--ffmpeg-location", ffmpeg_exe, "-f", fmt,
+                    "--download-sections", f"*{s:.0f}-{e:.0f}", "--force-keyframes-at-cuts",
+                    "--merge-output-format", "mp4", "-o", raw, f"https://www.youtube.com/watch?v={vid}"
+                ], timeout=100)
+                if os.path.exists(raw) and os.path.getsize(raw) > 50_000:
+                    break
+                if r_dl and r_dl.stderr:
+                    last_err = r_dl.stderr.strip().splitlines()[-1][:160]
+            if not (os.path.exists(raw) and os.path.getsize(raw) > 50_000):
+                print(f"[PESQUISA V5 DL] Falha em {m['mid']} ({vid}): {last_err}", flush=True)
                 return None
             subprocess.run([ffmpeg_exe, "-y", "-i", raw,
                             "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1",
