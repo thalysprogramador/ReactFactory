@@ -338,7 +338,9 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
             print(f"[VALIDAÇÃO] {m['mid']} erro {err}", flush=True)
             continue
         m.update({"validacao": v, "descricao_real": v.get("descricao_real", m["o_que_acontece"])})
-        aprovado = bool(v.get("e_gameplay")) and int(v.get("nota_visual", 0) or 0) >= 5
+        # Sobrescreve o_que_acontece com o que o Gemini REALMENTE VIU nos frames do clipe (evita narração desalinhada!)
+        m["o_que_acontece"] = m["descricao_real"]
+        aprovado = bool(v.get("e_gameplay")) and int(v.get("nota_visual", 0) or 0) >= 6
         print(f"[VALIDAÇÃO] {m['mid']} ({m['canal']}) gameplay={v.get('e_gameplay')} bate={v.get('bate_com_descricao')} "
               f"nota={v.get('nota_visual')} -> {'OK' if aprovado else 'DESCARTADO'} | {m['descricao_real']}", flush=True)
         if aprovado:
