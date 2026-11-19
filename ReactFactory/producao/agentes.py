@@ -212,7 +212,8 @@ REGRAS ABSOLUTAS DE SINCRONIZAÇÃO E QUALIDADE (ZERO TOLERÂNCIA A ERROS):
 4. ANIMAÇÕES REMOTION APENAS QUANDO COUBER (NO MÁXIMO 3 NO VÍDEO INTEIRO):
    - Use `"scene_type": "cinema_broll"` em ~90% dos blocos (gameplay puro com áudio original).
    - Use `"map_zoom"` (no máximo 1x no vídeo, quando falar de uma região específica do mapa de Leonida), `"character_dossier"` (no máximo 1x no vídeo, quando apresentar Lucia/Jason) e `"data_comparison"` (no máximo 1x no vídeo, quando fizer comparativo GTA V vs GTA VI).
-5. THUMBNAIL 100% COERENTE COM O TEMA DO VÍDEO:
+5. TÍTULO DE BUSCA CAUDA LONGA & THUMBNAIL 100% COERENTE (SEM TUDO EM CAIXA ALTA):
+   - "long_title": Título natural em português com foco em busca real de lançamento (ex: "10 Segredos e Detalhes ABSURDOS já Encontrados no GTA 6!", "Bugs BIZARROS e Coisas Escondidas no Mapa do GTA 6"). PROIBIDO escrever o título inteiro em MAIÚSCULAS — destaque no máximo 1 ou 2 palavras fortes em MAIÚSCULAS!
    - "thumb_text": 2 a 4 palavras chamativas sobre o tema central do vídeo (ZERO selos "AO VIVO" ou "LIVES").
    - "thumb_subtext": Frase curta complementar sobre o jogo (máx 40 chars).
 6. Cada bloco deve ter entre 36 e 54 palavras (~16 a 19 segundos de fala natural em português brasileiro).
