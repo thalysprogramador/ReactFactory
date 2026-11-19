@@ -1,0 +1,430 @@
+import os
+import random
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFilter
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, BASE_DIR)
+
+from composer import ASSETS_DIR, FFMPEG_EXE, get_media_duration, load_font  # noqa: E402
+from sfx import ensure_pop_sfx, ensure_sfx  # noqa: E402
+
+BGM_MOOD_MAP = {
+    "synth": "bgm_gta_synth.mp3",
+    "story": "bgm_gta_story.mp3",
+    "tension": "bgm_gta_tension.mp3",
+    "urban": "bgm_gta_urban.mp3",
+}
+
+
+def _clean_txt(t):
+    return "".join(c for c in (t or "") if ord(c) < 65000).strip()
+
+
+def _split_sub_chunks(text, total_dur):
+    words = (text or "").split()
+    if not words:
+        return []
+    n_chunks = max(2, min(6, (len(words) + 5) // 6))
+    per = max(1, (len(words) + n_chunks - 1) // n_chunks)
+    chunks = [" ".join(words[i:i + per]) for i in range(0, len(words), per)]
+    tot_chars = max(1, sum(len(c) for c in chunks))
+    timed = []
+    t_cur = 0.0
+    for i, c in enumerate(chunks):
+        span = total_dur * (len(c) / tot_chars)
+        t_end = total_dur if i == len(chunks) - 1 else min(total_dur, t_cur + span)
+        timed.append((c, t_cur, t_end))
+        t_cur = t_end
+    return timed
+
+
+def _make_doc_subtitle_png(text, highlight_word, out_png):
+    """Legenda cinematográfica no terço inferior (alta legibilidade, zero poluição)."""
+    img = Image.new("RGBA", (1920, 1080), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    font = load_font(56)
+
+    words = _clean_txt(text).upper().split()
+    lines = []
+    cur = []
+    for w in words:
+        cur.append(w)
+        if len(" ".join(cur)) >= 36 or len(cur) >= 7:
+            lines.append(cur)
+            cur = []
+    if cur:
+        lines.append(cur)
+    lines = lines[:2]
+
+    hl = _clean_txt(highlight_word).upper().strip()
+    y = 920 if len(lines) == 1 else 860
+    for line_words in lines:
+        full_s = " ".join(line_words)
+        bb = draw.textbbox((0, 0), full_s, font=font)
+        tw = bb[2] - bb[0]
+        th = bb[3] - bb[1]
+        x_start = (1920 - tw) // 2
+        draw.rounded_rectangle(
+            [x_start - 26, y - 10, x_start + tw + 26, y + th + 16],
+            radius=14, fill=(8, 10, 18, 205), outline=(255, 70, 180, 175), width=2,
+        )
+        xc = x_start
+        for w in line_words:
+            is_hl = hl and (w.strip(".,!?") in hl or hl in w)
+            col = (255, 232, 45, 255) if is_hl else (255, 255, 255, 255)
+            draw.text((xc, y - 4), w, font=font, fill=col, stroke_width=5, stroke_fill=(0, 0, 0, 255))
+            wb = draw.textbbox((0, 0), w + " ", font=font)
+            xc += wb[2] - wb[0]
+        y += 74
+
+    img.save(out_png)
+    return out_png
+
+
+def _make_chapter_card_jpg(act_num, act_title, bg_img_path, out_jpg):
+    """Card divisor editorial minimalista (Obsidian + Ouro) usado apenas entre Atos 2-5 (1.1s)."""
+    if bg_img_path and os.path.exists(bg_img_path):
+        im = Image.open(bg_img_path).convert("RGB")
+        iw, ih = im.size
+        sc = max(1920 / float(iw), 1080 / float(ih))
+        im = im.resize((int(iw * sc), int(ih * sc)), Image.Resampling.LANCZOS)
+        x0, y0 = (im.width - 1920) // 2, (im.height - 1080) // 2
+        bg = im.crop((x0, y0, x0 + 1920, y0 + 1080)).filter(ImageFilter.GaussianBlur(12))
+    else:
+        bg = Image.new("RGB", (1920, 1080), (10, 12, 18))
+
+    overlay = Image.new("RGBA", (1920, 1080), (8, 10, 16, 185))
+    canvas = Image.alpha_composite(bg.convert("RGBA"), overlay)
+    draw = ImageDraw.Draw(canvas)
+
+    # Linha editorial dourada limpa (zero barras rosa/ciano artificiais)
+    draw.rectangle([760, 396, 1160, 402], fill=(255, 190, 11, 255))
+
+    f_tag = load_font(34, style="poppins")
+    f_title = load_font(96, style="anton")
+    tag = f"PARTE {act_num}"
+    tb = draw.textbbox((0, 0), tag, font=f_tag)
+    tw = tb[2] - tb[0]
+    draw.text(((1920 - tw) // 2, 338), tag, font=f_tag, fill=(255, 190, 11, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
+
+    clean_t = _clean_txt(act_title).upper()
+    words = clean_t.split()
+    lines = []
+    cur = []
+    for w in words:
+        cur.append(w)
+        if len(" ".join(cur)) > 26:
+            lines.append(" ".join(cur[:-1]))
+            cur = [w]
+    if cur:
+        lines.append(" ".join(cur))
+    lines = lines[:2]
+
+    yy = 440 if len(lines) == 2 else 486
+    for ln in lines:
+        lb = draw.textbbox((0, 0), ln, font=f_title)
+        lw = lb[2] - lb[0]
+        draw.text(((1920 - lw) // 2, yy), ln, font=f_title, fill=(255, 255, 255, 255), stroke_width=6, stroke_fill=(0, 0, 0, 255))
+        yy += 112
+
+    canvas.convert("RGB").save(out_jpg, quality=92)
+    return out_jpg
+
+
+def _make_hud_top_png(act_num, total_acts, callout, out_png):
+    img = Image.new("RGBA", (1920, 1080), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # Barra de progresso discreta GTA Vice City
+    draw.rectangle([0, 0, 1920, 7], fill=(16, 16, 26, 200))
+    prog = act_num / float(max(1, total_acts))
+    draw.rectangle([0, 0, int(1920 * prog), 7], fill=(255, 75, 185, 255))
+
+    clean_co = _clean_txt(callout).upper()
+    if clean_co:
+        f_co = load_font(36)
+        bb = draw.textbbox((0, 0), clean_co, font=f_co)
+        tw, th = bb[2] - bb[0], bb[3] - bb[1]
+        draw.rounded_rectangle([38, 28, 38 + tw + 40, 28 + th + 24], radius=12, fill=(14, 12, 24, 210), outline=(0, 235, 255, 230), width=3)
+        draw.text((58, 36), clean_co, font=f_co, fill=(255, 240, 80, 255), stroke_width=2, stroke_fill=(0, 0, 0, 255))
+
+    img.save(out_png)
+    return out_png
+
+
+def _render_kenburns_cv2(img_path, dur, out_mp4, zoom_in=True, fps=24):
+    """Renderiza zoom/pan cinematográfico 1920x1080 via OpenCV+FFmpeg (~70x mais rápido que zoompan)."""
+    src = cv2.imread(img_path)
+    if src is None:
+        src = np.full((1080, 1920, 3), 24, dtype=np.uint8)
+    else:
+        sh, sw = src.shape[:2]
+        sc = max(1920.0 / sw, 1080.0 / sh)
+        nw, nh = max(1920, int(round(sw * sc))), max(1080, int(round(sh * sc)))
+        src = cv2.resize(src, (nw, nh), interpolation=cv2.INTER_AREA)
+        x0, y0 = (nw - 1920) // 2, (nh - 1080) // 2
+        src = src[y0:y0 + 1080, x0:x0 + 1920].copy()
+
+    n_frames = max(24, int(round(dur * fps)))
+    proc = subprocess.Popen([
+        FFMPEG_EXE, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", "1920x1080", "-r", str(fps), "-i", "pipe:0",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "19", "-pix_fmt", "yuv420p",
+        "-video_track_timescale", "24000", "-an",
+        out_mp4,
+    ], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for i in range(n_frames):
+        p = i / float(max(1, n_frames - 1))
+        z = (1.0 + 0.14 * p) if zoom_in else (1.14 - 0.12 * p)
+        cw, ch = max(2, int(1920 / z)), max(2, int(1080 / z))
+        cx, cy = (1920 - cw) // 2, (1080 - ch) // 2
+        fr = cv2.resize(src[cy:cy + ch, cx:cx + cw], (1920, 1080), interpolation=cv2.INTER_LINEAR)
+        proc.stdin.write(fr.tobytes())
+    proc.stdin.close()
+    rc = proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"FFmpeg KenBurns falhou (rc={rc}) em {img_path}")
+    return out_mp4
+
+
+def _render_visual_plate(dur, mp4_pool, jpg_pool, idx_cursor, out_raw_mp4, work_dir, tag, seed=0):
+    """
+    Gera o vídeo visual 1920x1080@24fps de um bloco (~15-20s) trocando de cena a cada ~4.4-6s,
+    alternando MP4s oficiais da Rockstar e animações Ken Burns rápidas de screenshots 4K.
+    """
+    rng = random.Random(seed)
+    sub_clips = []
+    remaining = dur
+    sub_idx = 0
+    while remaining > 0.1:
+        span = min(remaining, rng.uniform(4.4, 6.2))
+        if remaining - span < 2.2:
+            span = remaining
+        seg_p = os.path.join(work_dir, f"vis_{tag}_{sub_idx}.mp4")
+        use_mp4 = bool(mp4_pool) and (sub_idx % 2 == 0 or not jpg_pool)
+        if use_mp4:
+            src_v = mp4_pool[(idx_cursor + sub_idx) % len(mp4_pool)]
+            src_dur = max(1.0, get_media_duration(src_v))
+            ss = rng.uniform(0.0, max(0.0, src_dur - span - 0.2)) if src_dur > span + 0.5 else 0.0
+            subprocess.run([
+                FFMPEG_EXE, "-y", "-stream_loop", "-1", "-ss", f"{ss:.2f}", "-i", src_v,
+                "-t", f"{span:.2f}",
+                "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,eq=contrast=1.05:saturation=1.10,fps=24,setsar=1",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "19", "-pix_fmt", "yuv420p", "-an",
+                seg_p,
+            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            src_img = jpg_pool[(idx_cursor + sub_idx) % len(jpg_pool)]
+            _render_kenburns_cv2(src_img, span, seg_p, zoom_in=(sub_idx % 4 == 1), fps=24)
+        sub_clips.append(seg_p)
+        remaining -= span
+        sub_idx += 1
+
+    ct = os.path.join(work_dir, f"vis_{tag}_concat.txt")
+    with open(ct, "w", encoding="utf-8") as f:
+        for sp in sub_clips:
+            f.write(f"file '{os.path.abspath(sp).replace(chr(92), '/')}'\n")
+    subprocess.run([FFMPEG_EXE, "-y", "-f", "concat", "-safe", "0", "-i", ct, "-c", "copy", out_raw_mp4], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return out_raw_mp4, sub_idx
+
+
+def build_gta6_long_thumbnail(jpg_vault, thumb_text, out_jpg):
+    """Thumbnail nível canal grande de GTA 6 (1280x720, zero avatar, foco total em contraste/curiosidade)."""
+    hero = None
+    for p in jpg_vault:
+        im = Image.open(p)
+        if im.width >= 1000 and im.width > im.height:
+            hero = im.convert("RGB")
+            break
+    if hero is None and jpg_vault:
+        hero = Image.open(jpg_vault[0]).convert("RGB")
+    if hero is None:
+        hero = Image.new("RGB", (1280, 720), (25, 12, 42))
+
+    # Resize/crop cover 1280x720 + punch de cor Vice City
+    sc = max(1280 / float(hero.width), 720 / float(hero.height))
+    hero = hero.resize((int(hero.width * sc), int(hero.height * sc)), Image.Resampling.LANCZOS)
+    x0, y0 = (hero.width - 1280) // 2, (hero.height - 720) // 2
+    canvas = hero.crop((x0, y0, x0 + 1280, y0 + 720))
+
+    arr = np.array(canvas, dtype=np.float32)
+    # Saturação + contraste cinematográfico + vinheta escura embaixo para o texto explodir
+    mean = arr.mean(axis=2, keepdims=True)
+    arr = np.clip(mean + (arr - mean) * 1.25, 0, 255)
+    arr = np.clip((arr - 128) * 1.12 + 128, 0, 255)
+    # Gradiente escuro inferior 100% suave (sem linha de corte horizontal)
+    grad = np.ones((720, 1, 1), dtype=np.float32)
+    grad[340:] = np.linspace(1.0, 0.26, 720 - 340, dtype=np.float32)[:, None, None]
+    arr = arr * grad
+    canvas = Image.fromarray(arr.astype(np.uint8))
+
+    draw = ImageDraw.Draw(canvas)
+    # Badge GTA 6 canto superior esquerdo
+    f_badge = load_font(56)
+    draw.rounded_rectangle([32, 28, 250, 108], radius=16, fill=(235, 36, 130), outline=(255, 232, 45), width=5)
+    draw.text((54, 38), "GTA 6", font=f_badge, fill=(255, 255, 255), stroke_width=4, stroke_fill=(0, 0, 0))
+
+    # Texto gigante na base
+    f_big = load_font(118)
+    clean_t = (_clean_txt(thumb_text) or "VAI MUDAR TUDO!").upper()
+    tb = draw.textbbox((0, 0), clean_t, font=f_big)
+    tw = tb[2] - tb[0]
+    while tw > 1200 and f_big.size > 68:
+        f_big = load_font(f_big.size - 8)
+        tb = draw.textbbox((0, 0), clean_t, font=f_big)
+        tw = tb[2] - tb[0]
+    tx = (1280 - tw) // 2
+    draw.text((tx + 6, 545 + 6), clean_t, font=f_big, fill=(0, 0, 0))
+    draw.text((tx, 545), clean_t, font=f_big, fill=(255, 235, 30), stroke_width=10, stroke_fill=(0, 0, 0))
+
+    canvas.save(out_jpg, quality=95)
+    return out_jpg
+
+
+def compose_gta6_long_video(script_data, wav_map, mp4_vault, jpg_vault, work_dir, output_mp4, output_thumb_jpg):
+    sfx_whoosh, sfx_freeze = ensure_sfx()
+    sfx_pop = ensure_pop_sfx()
+
+    acts = script_data["acts"]
+    total_acts = len(acts)
+    ordered_segments = []
+    block_jobs = []
+    idx_cursor = 0
+    chapters_ts = []
+    total_t = 0.0
+
+    for a_idx, act in enumerate(acts):
+        act_num = int(act.get("act_num", a_idx + 1))
+        act_title = act.get("act_title", f"ATO {act_num}")
+        mood = act.get("bgm_mood", "synth")
+        bgm_file = os.path.join(ASSETS_DIR, BGM_MOOD_MAP.get(mood, "bgm_gta_synth.mp3"))
+        if not os.path.exists(bgm_file):
+            bgm_file = os.path.join(ASSETS_DIR, "bgm_gta_synth.mp3")
+        bgm_dur = max(15.0, get_media_duration(bgm_file))
+
+        mm, ss = divmod(int(total_t), 60)
+        chapters_ts.append(f"{mm}:{ss:02d} {act_title}")
+
+        # Card animado de abertura de Capítulo (2.2s) com BGM + whoosh
+        card_jpg = os.path.join(work_dir, f"act_{act_num}_card.jpg")
+        bg_img = jpg_vault[a_idx % len(jpg_vault)] if jpg_vault else None
+        _make_chapter_card_jpg(act_num, act_title, bg_img, card_jpg)
+        card_vis = os.path.join(work_dir, f"card_act{act_num:02d}_vis.mp4")
+        _render_kenburns_cv2(card_jpg, 2.20, card_vis, zoom_in=True, fps=24)
+        card_mp4 = os.path.join(work_dir, f"seg_act{act_num:02d}_00_card.mp4")
+        subprocess.run([
+            FFMPEG_EXE, "-y", "-i", card_vis,
+            "-i", sfx_whoosh, "-stream_loop", "-1", "-i", bgm_file,
+            "-filter_complex", "[1:a]volume=0.55[s];[2:a]atrim=0:2.20,volume=1.10[b];[s][b]amix=inputs=2:duration=longest:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[a]",
+            "-map", "0:v", "-map", "[a]", "-t", "2.20",
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-video_track_timescale", "24000",
+            card_mp4,
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ordered_segments.append(card_mp4)
+        total_t += 2.20
+
+        bgm_offset = 2.2
+        for b_idx, blk in enumerate(act.get("blocks", [])):
+            bid = f"a{act_num}_b{b_idx}"
+            wav_p = wav_map[bid]
+            dur = max(2.2, get_media_duration(wav_p) + 0.18)
+            seg_out = os.path.join(work_dir, f"seg_{act_num:02d}_{b_idx:02d}.mp4")
+            ordered_segments.append(seg_out)
+            bgm_ss = bgm_offset % max(2.0, bgm_dur - dur - 2.0)
+            block_jobs.append({
+                "bid": bid,
+                "act_num": act_num,
+                "b_idx": b_idx,
+                "blk": blk,
+                "wav_p": wav_p,
+                "dur": dur,
+                "idx_cursor": idx_cursor,
+                "bgm_file": bgm_file,
+                "bgm_ss": bgm_ss,
+                "seg_out": seg_out,
+                "seed": a_idx * 100 + b_idx,
+            })
+            idx_cursor += max(3, int(dur // 4.5) + 1)
+            bgm_offset += dur
+            total_t += dur
+
+    def _render_one_block(job):
+        bid = job["bid"]
+        dur = job["dur"]
+        blk = job["blk"]
+        hud_png = os.path.join(work_dir, f"hud_{bid}.png")
+        _make_hud_top_png(job["act_num"], total_acts, blk.get("callout", ""), hud_png)
+
+        raw_vis = os.path.join(work_dir, f"vis_{bid}_raw.mp4")
+        _render_visual_plate(dur, mp4_vault, jpg_vault, job["idx_cursor"], raw_vis, work_dir, bid, seed=job["seed"])
+
+        chunks = _split_sub_chunks(blk["narration"], dur)
+        sub_inputs = ["-i", hud_png]
+        ov_parts = ["[0:v][4:v]overlay=0:0[vhud]"]
+        cur_lbl = "vhud"
+        for ci, (ctext, t0, t1) in enumerate(chunks):
+            sp = os.path.join(work_dir, f"sub_{bid}_{ci}.png")
+            _make_doc_subtitle_png(ctext, blk.get("callout", ""), sp)
+            sub_inputs += ["-i", sp]
+            inp_i = 5 + ci
+            nxt = f"sv_{ci}"
+            ov_parts.append(f"[{cur_lbl}][{inp_i}:v]overlay=0:0:enable='between(t,{t0:.2f},{t1:.2f})'[{nxt}]")
+            cur_lbl = nxt
+        ov_parts.append(f"[{cur_lbl}]format=yuv420p[vout]")
+
+        fade_st = max(0.0, dur - 0.35)
+        sfx_p = sfx_pop if job["b_idx"] > 0 else sfx_freeze
+        aud_fc = (
+            f"[1:a]volume=1.18[vo];"
+            f"[2:a]atrim=0:{dur:.2f},afade=t=in:st=0:d=0.25,afade=t=out:st={fade_st:.2f}:d=0.35,volume=0.88[bm];"
+            f"[3:a]volume=0.28[sx];"
+            f"[vo][bm][sx]amix=inputs=3:duration=first:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[aout]"
+        )
+
+        cmd = [
+            FFMPEG_EXE, "-y",
+            "-i", raw_vis,
+            "-i", job["wav_p"],
+            "-stream_loop", "-1", "-ss", f"{job['bgm_ss']:.2f}", "-i", job["bgm_file"],
+            "-i", sfx_p,
+        ] + sub_inputs + [
+            "-filter_complex", ";".join(ov_parts) + ";" + aud_fc,
+            "-map", "[vout]", "-map", "[aout]", "-t", f"{dur:.2f}",
+            "-c:v", "libx264", "-preset", "superfast", "-crf", "20", "-r", "24",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-video_track_timescale", "24000",
+            job["seg_out"],
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return bid
+
+    print(f"[GTA6 LONG COMPOSER] Renderizando {len(block_jobs)} blocos em paralelo (1080p24 + HUD + legendas + 4 trilhas)...", flush=True)
+    done_cnt = 0
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futs = [pool.submit(_render_one_block, job) for job in block_jobs]
+        for fut in as_completed(futs):
+            fut.result()
+            done_cnt += 1
+            if done_cnt % 5 == 0 or done_cnt == len(block_jobs):
+                print(f"[GTA6 LONG COMPOSER] Cenas prontas: {done_cnt}/{len(block_jobs)}", flush=True)
+
+    segments = ordered_segments
+    concat_txt = os.path.join(work_dir, "gta6_long_concat.txt")
+    with open(concat_txt, "w", encoding="utf-8") as f:
+        for s in segments:
+            f.write(f"file '{os.path.abspath(s).replace(chr(92), '/')}'\n")
+
+    print(f"[GTA6 LONG COMPOSER] Concatenando {len(segments)} cenas em 1920x1080 ({total_t/60:.2f} min)...", flush=True)
+    subprocess.run([
+        FFMPEG_EXE, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt,
+        "-c", "copy", "-movflags", "+faststart", output_mp4,
+    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    build_gta6_long_thumbnail(jpg_vault, script_data.get("thumb_text", "QUINTA-FEIRA!"), output_thumb_jpg)
+    real_dur = get_media_duration(output_mp4)
+    print(f"[GTA6 LONG COMPOSER] Vídeo longo finalizado: {output_mp4} ({real_dur/60:.2f} min | {real_dur:.1f}s)")
+    return output_mp4, output_thumb_jpg, chapters_ts, real_dur
