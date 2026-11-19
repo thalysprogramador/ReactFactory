@@ -37,8 +37,20 @@ def run_gta6_long_pipeline(do_upload=False):
     work_dir = os.path.join(GTA6_TEMP_DIR, "long_work")
     os.makedirs(work_dir, exist_ok=True)
 
-    # ETAPAS 1-3: Pesquisa diária, seleção de pauta e verificação de fontes
+    # ETAPAS 1-3: Pesquisa ampla do zero em tempo real (V5: vídeos recém-postados + lives no ar + áudio original)
     research = research_gta6_references(kind="long")
+    v5_momentos = []
+    try:
+        from producao.pesquisa_ao_vivo import pesquisar_do_zero  # noqa: WPS433
+
+        pauta_v5, v5_momentos = pesquisar_do_zero(FFMPEG_EXE)
+        if v5_momentos:
+            research["v5_momentos"] = v5_momentos
+            if pauta_v5.get("pauta_longo", {}).get("tema"):
+                research["chosen_angle"] = pauta_v5["pauta_longo"]["tema"]
+    except Exception as err_v5:
+        print(f"[PESQUISA V5] Aviso fallback: {err_v5}", flush=True)
+
     mp4_vault, jpg_vault = sync_rockstar_gta6_vault(max_mp4=12, max_jpg=30)
 
     # ETAPA 4: Direção Criativa (Agente 1)
@@ -53,6 +65,22 @@ def run_gta6_long_pipeline(do_upload=False):
         print(f"[GTA6 STUDIO] Aviso Agente 2 ({err_ag2}) -> usando gerador de contingência.")
         script_data = generate_gta6_long_script(research)
         script_data["acts"] = AgenteDiretorCriativo.enriquecer_storyboard(script_data.get("acts", []), formato="long")
+
+    # Injeta os clipes reais validados (COM ÁUDIO ORIGINAL) nos blocos correspondentes e na thumbnail
+    if v5_momentos:
+        by_mid = {m["mid"]: m for m in v5_momentos if m.get("clip") and os.path.exists(m["clip"])}
+        ordered_clips = [m["clip"] for m in v5_momentos if m.get("clip") and os.path.exists(m["clip"])]
+        if ordered_clips:
+            best_m = max(v5_momentos, key=lambda m: int((m.get("validacao") or {}).get("nota_visual", 0) or 0))
+            script_data["thumb_hero_path"] = best_m.get("clip") or ordered_clips[0]
+            c_idx = 0
+            for act in script_data.get("acts", []):
+                for blk in act.get("blocks", []):
+                    mid = blk.get("moment_id")
+                    m_clip = by_mid[mid]["clip"] if (mid and mid in by_mid) else ordered_clips[c_idx % len(ordered_clips)]
+                    c_idx += 1
+                    existing_v = list(blk.get("video_clips") or [])
+                    blk["video_clips"] = [m_clip] + [v for v in existing_v if v != m_clip][:2]
 
     with open(os.path.join(work_dir, "script_gta6_long.json"), "w", encoding="utf-8") as sf:
         json.dump(script_data, sf, indent=2, ensure_ascii=False)
