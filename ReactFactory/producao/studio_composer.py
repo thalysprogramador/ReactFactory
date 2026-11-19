@@ -318,21 +318,39 @@ def _render_block_video(job, fallback_clips, sfx_pack, work_dir):
         job["act_title"],
     )
 
-    # Carrega os 3 vídeos 1080p semânticos distintos atribuídos a este bloco
-    sem_vids = list(blk.get("video_clips") or [])
-    while len(sem_vids) < 3 and fallback_clips:
-        sem_vids.append(fallback_clips[(job["global_idx"] * 3 + len(sem_vids)) % len(fallback_clips)])
+    # Sincronização 1-para-1 (V5.1):
+    # Quando o bloco tem 1 clipe específico sincronizado à narração (`sync_lock=True` ou len==1),
+    # reproduz ESSE MESMO CLIPE do início ao fim do bloco (sem pular para cenas aleatórias que não batem com a fala!).
+    sem_vids = [v for v in (blk.get("video_clips") or []) if v and os.path.exists(v)]
+    sync_lock = bool(blk.get("sync_lock")) or (len(sem_vids) == 1)
+    if not sem_vids and fallback_clips:
+        sem_vids = [fallback_clips[job["global_idx"] % len(fallback_clips)]]
+        sync_lock = True
 
-    frames_v0 = _load_video_frames(sem_vids[0] if len(sem_vids) > 0 else None, max_frames=140)
-    frames_v1 = _load_video_frames(sem_vids[1] if len(sem_vids) > 1 else None, max_frames=140) or frames_v0
-    frames_v2 = _load_video_frames(sem_vids[2] if len(sem_vids) > 2 else None, max_frames=140) or frames_v1
+    if sync_lock:
+        frames_v0 = _load_video_frames(sem_vids[0], max_frames=max(total_frames + 24, 360))
+        frames_v1 = frames_v0
+        frames_v2 = frames_v0
+    else:
+        while len(sem_vids) < 3 and fallback_clips:
+            sem_vids.append(fallback_clips[(job["global_idx"] * 3 + len(sem_vids)) % len(fallback_clips)])
+        frames_v0 = _load_video_frames(sem_vids[0], max_frames=200)
+        frames_v1 = _load_video_frames(sem_vids[1], max_frames=200) or frames_v0
+        frames_v2 = _load_video_frames(sem_vids[2], max_frames=200) or frames_v1
 
     remotion_frames = []
     if is_remotion_scene and job.get("remotion_mp4") and os.path.exists(job["remotion_mp4"]):
-        remotion_frames = _load_video_frames(job["remotion_mp4"], max_frames=140)
+        remotion_frames = _load_video_frames(job["remotion_mp4"], max_frames=160)
 
-    f1_end = int(total_frames * (0.45 if remotion_frames else 0.34))
-    f2_end = int(total_frames * (0.73 if remotion_frames else 0.67))
+    if sync_lock and not remotion_frames:
+        f1_end = total_frames
+        f2_end = total_frames
+    elif sync_lock and remotion_frames:
+        f1_end = int(total_frames * 0.40)
+        f2_end = total_frames
+    else:
+        f1_end = int(total_frames * (0.45 if remotion_frames else 0.34))
+        f2_end = int(total_frames * (0.73 if remotion_frames else 0.67))
     trans_len = 10
 
     headline = blk.get("headline") or blk.get("callout") or "DOSSIE GTA VI"
