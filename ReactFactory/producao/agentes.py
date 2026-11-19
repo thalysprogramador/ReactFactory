@@ -55,16 +55,20 @@ class AgenteDiretorCriativo:
     @staticmethod
     def enriquecer_storyboard(acts, formato="long", research_data=None):
         """
-        Regra Editorial V3 (Animações SELETIVAS — Só Quando Necessário):
-        - 75% a 80% dos blocos usam 'cinema_broll' (Vídeo 1080p puro de gameplay/trailer com câmera DoP estilo Higgsfield
-          e lower-third discreto apenas nos primeiros 3.5s).
-        - Apenas 1 bloco por Ato (quando o texto realmente cita região do mapa, dossiê de personagem ou comparativo de dados)
-          dispara uma animação real em vídeo MP4 renderizada pelo Remotion ('npx remotion render').
+        Regra Editorial V6 (SINCRONIZAÇÃO 1-PARA-1 ZERO REPETIÇÃO + REMOTION CINEMA SELETIVO):
+        - Cada bloco recebe 1 único clipe real validado (`clip_id`) do catálogo mestre (`get_all_verified_clip_catalog`),
+          com `sync_lock=True`, garantindo ZERO repetição de clipes no mesmo vídeo e 100% de encaixe fala↔vídeo!
+        - Animações Remotion nível cinema são usadas NO MÁXIMO 3 VEZES no vídeo inteiro (no máximo 1 map_zoom,
+          1 character_dossier e 1 data_comparison — nunca repetindo o mesmo template!).
         """
         from composer import FFMPEG_EXE  # noqa: WPS433
+        from producao.catalog import get_all_verified_clip_catalog, _score_text_against_tags  # noqa: WPS433
 
+        clip_catalog = get_all_verified_clip_catalog((research_data or {}).get("v5_momentos"))
+        used_cids = set()
+        used_remotion_types = set()
         flat_blocks = []
-        used_remotion_types = []
+
         for a_idx, act in enumerate(acts):
             act_num = int(act.get("act_num", a_idx + 1))
             remotion_used_in_act = False
@@ -72,24 +76,59 @@ class AgenteDiretorCriativo:
                 txt = (blk.get("narration", "") + " " + blk.get("callout", "") + " " + blk.get("headline", "")).lower()
                 st = "cinema_broll"
 
-                # Só ativa animação Remotion se ainda não usou neste Ato e o conteúdo realmente pedir
-                if not remotion_used_in_act:
-                    if any(k in txt for k in ["mapa", "regiões", "leonida keys", "grassrivers", "gellhorn", "kalaga", "ambrosia", "geografia"]):
+                # Máximo 3 animações Remotion no vídeo inteiro (e no máximo 1 de cada tipo, só quando couber!)
+                if not remotion_used_in_act and len(used_remotion_types) < 3:
+                    if "map_zoom" not in used_remotion_types and any(
+                        k in txt for k in ["mapa", "leonida keys", "grassrivers", "gellhorn", "kalaga", "ambrosia", "arquipélago"]
+                    ):
                         st = "map_zoom"
-                    elif any(k in txt for k in ["lucia", "jason", "raul", "boobie", "drequan", "protagonista", "casal", "dossiê"]):
+                    elif "character_dossier" not in used_remotion_types and any(
+                        k in txt for k in ["lucia", "jason", "protagonista", "casal", "dossiê"]
+                    ):
                         st = "character_dossier"
-                    elif any(k in txt for k in ["compar", "gta 5", "gta v", "salto", "recorde", "milhões", "bilhões", "19 de novembro"]):
+                    elif "data_comparison" not in used_remotion_types and any(
+                        k in txt for k in ["compar", "gta 5", "gta v", "evolução", "salto", "recorde"]
+                    ):
                         st = "data_comparison"
 
-                    # Se já repetiu o mesmo tipo no Ato anterior, rotaciona ou mantém cinema_broll
                     if st != "cinema_broll":
-                        if used_remotion_types and used_remotion_types[-1] == st:
-                            for alt in ("map_zoom", "character_dossier", "data_comparison"):
-                                if alt not in used_remotion_types[-2:]:
-                                    st = alt
-                                    break
                         remotion_used_in_act = True
-                        used_remotion_types.append(st)
+                        used_remotion_types.add(st)
+
+                # Trava 1-para-1 do clipe real validado (ZERO repetição de clipes!)
+                chosen_cid = blk.get("clip_id") or blk.get("moment_id")
+                if chosen_cid and f"live_{chosen_cid}" in clip_catalog:
+                    chosen_cid = f"live_{chosen_cid}"
+                if not (chosen_cid and chosen_cid in clip_catalog and chosen_cid not in used_cids):
+                    # Escolhe o clipe NÃO USADO mais aderente semanticamente ao texto deste bloco
+                    ranked = []
+                    for cid, meta in clip_catalog.items():
+                        if cid in used_cids:
+                            continue
+                        sc = _score_text_against_tags(txt, meta.get("tags", []))
+                        # Bonus para palavras em comum com a descrição real do clipe
+                        desc_words = {w.strip(".,!?") for w in meta.get("desc", "").lower().split() if len(w) >= 4}
+                        txt_words = {w.strip(".,!?") for w in txt.split() if len(w) >= 4}
+                        sc += len(desc_words & txt_words) * 5
+                        if meta.get("has_audio"):
+                            sc += 3
+                        sc -= (meta.get("priority", 3) - 1) * 2
+                        ranked.append((sc, cid))
+                    ranked.sort(key=lambda x: x[0], reverse=True)
+                    if ranked:
+                        chosen_cid = ranked[0][1]
+                    elif clip_catalog:
+                        # Só recicla se realmente acabarem todos os clipes únicos do catálogo
+                        chosen_cid = list(clip_catalog.keys())[len(flat_blocks) % len(clip_catalog)]
+
+                if chosen_cid and chosen_cid in clip_catalog:
+                    used_cids.add(chosen_cid)
+                    meta = clip_catalog[chosen_cid]
+                    blk["clip_id"] = chosen_cid
+                    blk["video_clips"] = [meta["path"]]
+                    blk["sync_lock"] = True
+                    if not blk.get("location_key") or blk.get("location_key") == "vice_city":
+                        blk["location_key"] = meta.get("regiao", "vice_city")
 
                 blk["scene_type"] = st
                 blk["act_num"] = act_num
@@ -100,15 +139,18 @@ class AgenteDiretorCriativo:
         semantic_assets = select_semantic_assets(
             flat_blocks,
             prefer_horizontal=(formato == "long"),
-            research_data=research_data,
-            ffmpeg_exe=FFMPEG_EXE,
+            research_data=None,
+            ffmpeg_exe=None,
         )
         for blk, asset in zip(flat_blocks, semantic_assets):
-            blk["video_clips"] = asset.get("video_clips", [])
+            if not blk.get("video_clips"):
+                blk["video_clips"] = asset.get("video_clips", [])[:1]
+                blk["sync_lock"] = True
             blk["primary_img"] = asset["primary_img"]
             blk["secondary_img"] = asset["secondary_img"]
             blk["asset_subject"] = asset["subject"]
             blk["asset_tags"] = asset["tags"]
+        print(f"[DIRETOR V6] {len(flat_blocks)} blocos | {len(used_cids)} clipes ÚNICOS (sync_lock=True) | Remotion={sorted(list(used_remotion_types))}", flush=True)
         return acts
 
 
@@ -137,40 +179,43 @@ class AgentePesquisadorRoteirista:
         )
         angle = research_data.get("chosen_angle", "GTA 6 LANÇADO: O MELHOR DAS LIVES DO DAVY JONES E BISTECONE EM VICE CITY")
 
-        v5_moms = research_data.get("v5_momentos") or []
-        v5_txt = "\n".join(
-            f"- [{m.get('mid')}] (Canal: {m.get('canal')}, Assunto: {m.get('assunto')}) {m.get('descricao_real')}"
-            for m in v5_moms[:10]
+        from producao.catalog import get_all_verified_clip_catalog  # noqa: WPS433
+
+        clip_catalog = get_all_verified_clip_catalog(research_data.get("v5_momentos"))
+        cat_lines = "\n".join(
+            f"- clip_id=\"{cid}\" | fonte=\"{meta['channel']}\" | cena_na_tela=\"{meta['desc']}\""
+            for cid, meta in list(clip_catalog.items())[:45]
         )
 
-        prompt = f"""Você é o AGENTE 2 (Pesquisador-Chefe e Roteirista) de um canal brasileiro de GTA 6 com edição 100% humanizada.
-Contexto: O GTA 6 acabou de ser lançado. Acabamos de pesquisar do zero dezenas de vídeos recém-postados e lives no ar (de criadores grandes e pequenos) e separamos cenas reais validadas do jogo.
+        prompt = f"""Você é o AGENTE 2 (Pesquisador-Chefe e Roteirista) de um canal brasileiro de GTA 6 com edição 100% humanizada e nível cinema.
+Contexto: O GTA 6 acabou de ser lançado! Temos abaixo o CATÁLOGO REAL DE CLIPES DE GAMEPLAY DISPONÍVEIS E VALIDADOS EM DISCO (cada um com seu `clip_id` e a descrição exata do que está passando na tela).
 
 PAUTA PRINCIPAL: "{angle}"
 
-CENAS REAIS DO JOGO VALIDADAS AGORA (COM ÁUDIO ORIGINAL):
-{v5_txt}
+CATÁLOGO REAL DE CLIPES DISPONÍVEIS PARA ESTE VÍDEO (USE SOMENTE ESTES `clip_id`s):
+{cat_lines}
 
-OUTRAS REFERÊNCIAS RECENTES:
+REFERÊNCIAS RECENTES:
 {refs_txt}
-{news_txt}
 
-REGRAS EDITORIAIS E DE RETENÇÃO OBRIGATÓRIAS:
-1. PROTAGONISTA 100% O JOGO (NÃO REAÇÕES DE STREAMERS):
-   - O foco central é O JOGO: novidades, o que existe dentro dele, cenas que despertam curiosidade, momentos mais loucos, segredos e bugs recém-descobertos.
-   - Cite criadores apenas como fonte natural quando fizer sentido (ex: "na live do canal X apareceu..."), nunca como o assunto principal do vídeo.
-2. GANCHO FORTE NOS PRIMEIROS 10 SEGUNDOS (ATO 1 BLOCO 1) + CTA NATURAL NO FINAL:
-   - Proibido começar com "Olá pessoal" ou introduções genéricas. Vá direto para a descoberta mais absurda do jogo.
-   - Encaixe uma CTA natural no último bloco pedindo opinião nos comentários e inscrição.
-3. NARRAÇÃO 100% HUMANA E FLUIDA:
-   - Escreva como um gamer/criador brasileiro natural falando com a audiência, sem clichês de IA.
-4. COERÊNCIA VISUAL TOTAL:
-   - Para cada bloco, defina "scene_type": "cinema_broll" em 75% a 80% dos blocos (usando os clipes reais validados com áudio original!), e use "map_zoom" (nosso voo de satélite 3D sobre Leonida), "character_dossier" ou "data_comparison" no máximo 1 vez por Ato, apenas quando agregar valor.
-   - Se o bloco ilustrar uma das CENAS REAIS listadas acima, coloque o "mid" correspondente no campo "moment_id" (ex: "m8").
-5. THUMBNAIL 100% FOCADA NO JOGO (ZERO STREAMERS, ZERO 'AO VIVO' / 'LIVES'):
-   - "thumb_text": 2 a 4 palavras extremamente chamativas tiradas diretamente da descoberta do jogo (ex: "BEBÊS NO GTA 6?", "TIGRE ESCONDIDO!", "BUG QUEBROU TUDO!").
+REGRAS ABSOLUTAS DE SINCRONIZAÇÃO E QUALIDADE (ZERO TOLERÂNCIA A ERROS):
+1. SINCRONIZAÇÃO 1-PARA-1 OBRIGATÓRIA (FALA ↔ IMAGEM):
+   - O vídeo terá exatamente {num_acts} Atos com {blocks_per_act} blocos cada (total = {num_acts * blocks_per_act} blocos, resultando em 8m30s a 9m30s).
+   - Para CADA bloco, você DEVE escolher **1 `clip_id` ÚNICO** da lista acima (PROIBIDO repetir o mesmo `clip_id` em dois blocos diferentes do vídeo!).
+   - A `narration` daquele bloco DEVE falar e comentar **EXATAMENTE SOBRE O QUE ESTÁ NA `cena_na_tela` DAQUELE `clip_id`**!
+   - PROIBIDO narrar sobre um assunto (ex: celular ou bug) enquanto o `clip_id` escolhido mostra outra coisa (ex: carro ou praia). O texto tem que casar 100% com a imagem daquele `clip_id`!
+2. PROTAGONISTA 100% O JOGO (NÃO REAÇÕES DE STREAMERS):
+   - Foque no jogo: novidades, detalhes absurdos, bugs, física, mecânicas, mapa e momentos loucos. Cite o criador apenas de forma natural quando fizer sentido (*"como apareceu na gameplay do..."*).
+3. GANCHO FORTE NO ATO 1 BLOCO 1 + CTA NATURAL NO ÚLTIMO BLOCO:
+   - Comece direto na cena/descoberta mais impactante (proibido "Olá pessoal").
+   - Feche o último bloco com uma pergunta envolvente para comentários e CTA natural de inscrição.
+4. ANIMAÇÕES REMOTION APENAS QUANDO COUBER (NO MÁXIMO 3 NO VÍDEO INTEIRO):
+   - Use `"scene_type": "cinema_broll"` em ~90% dos blocos (gameplay puro com áudio original).
+   - Use `"map_zoom"` (no máximo 1x no vídeo, quando falar de uma região específica do mapa de Leonida), `"character_dossier"` (no máximo 1x no vídeo, quando apresentar Lucia/Jason) e `"data_comparison"` (no máximo 1x no vídeo, quando fizer comparativo GTA V vs GTA VI).
+5. THUMBNAIL 100% COERENTE COM O TEMA DO VÍDEO:
+   - "thumb_text": 2 a 4 palavras chamativas sobre o tema central do vídeo (ZERO selos "AO VIVO" ou "LIVES").
    - "thumb_subtext": Frase curta complementar sobre o jogo (máx 40 chars).
-6. Estrutura: {num_acts} Atos, cada Ato com exatamente {blocks_per_act} blocos de narração (cada bloco com 32 a 50 palavras).
+6. Cada bloco deve ter entre 36 e 54 palavras (~16 a 19 segundos de fala natural em português brasileiro).
 
 Retorne APENAS JSON válido no formato:
 {{
@@ -186,13 +231,11 @@ Retorne APENAS JSON válido no formato:
       "bgm_mood": "synth",
       "blocks": [
         {{
-          "narration": "Texto falado natural em PT-BR focado no jogo...",
+          "clip_id": "EXATO_CLIP_ID_DA_LISTA_ACIMA",
+          "narration": "Texto falado natural em PT-BR descrevendo e comentando EXATAMENTE a cena daquele clip_id...",
           "headline": "TÍTULO DISCRETO DO TÓPICO",
           "subheadline": "Complemento informativo curto",
           "callout": "VICE CITY",
-          "moment_id": "m8",
-          "badge_type": "OFICIAL",
-          "source_label": "Gameplay GTA VI",
           "scene_type": "cinema_broll",
           "location_key": "vice_city",
           "character_name": "LUCIA & JASON",
