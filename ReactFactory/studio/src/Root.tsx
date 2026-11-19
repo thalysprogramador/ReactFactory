@@ -34,12 +34,9 @@ const defaultProps: SceneProps = {
 
 const defaultThumbProps: Thumb3DProps = {
   heroImageUrl: "",
-  livePipUrl: "",
-  topKicker: "GTA VI • GAMEPLAY REAL",
-  line1: "ELES TRAVARAM",
-  line2: "AO VIVO!",
-  subline: "DAVY JONES & BISTECONE EM VICE CITY",
-  liveLabel: "AO VIVO • PS5 PRO",
+  line1: "BUGS ABSURDOS",
+  line2: "NO GTA 6!",
+  subline: "O QUE ACABARAM DE DESCOBRIR EM VICE CITY",
   accentColor: "#FFBE0B"
 };
 
