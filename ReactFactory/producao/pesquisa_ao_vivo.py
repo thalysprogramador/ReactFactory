@@ -25,7 +25,31 @@ from producao.gemini_client import gemini_text
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESEARCH_DIR = os.path.join(BASE_DIR, "temp_gta6", "pesquisa_v5")
+HISTORY_V5_FILE = os.path.join(BASE_DIR, "data", "history_v5.json")
 YTDLP = [sys.executable, "-m", "yt_dlp", "--no-warnings", "--quiet"]
+
+
+def _load_v5_history():
+    if os.path.exists(HISTORY_V5_FILE):
+        try:
+            return json.load(open(HISTORY_V5_FILE, encoding="utf-8"))
+        except Exception:
+            pass
+    return {"used_video_ids": [], "used_topics": []}
+
+
+def _save_v5_history(video_ids, topic=None):
+    os.makedirs(os.path.dirname(HISTORY_V5_FILE), exist_ok=True)
+    h = _load_v5_history()
+    for vid in video_ids:
+        if vid and vid not in h["used_video_ids"]:
+            h["used_video_ids"].append(vid)
+    if topic and topic not in h["used_topics"]:
+        h["used_topics"].append(topic)
+    h["used_video_ids"] = h["used_video_ids"][-300:]
+    h["used_topics"] = h["used_topics"][-80:]
+    with open(HISTORY_V5_FILE, "w", encoding="utf-8") as f:
+        json.dump(h, f, ensure_ascii=False, indent=2)
 
 GTA_RE = re.compile(r"gta\s*(6|vi)\b|grand theft auto vi|vice city|leonida", re.I)
 BLOCK_RE = re.compile(r"trailer oficial|official trailer|react(ing)? to trailer|previs[aã]o|vai ter|teoria", re.I)
@@ -89,10 +113,13 @@ def descobrir_conteudo(n_queries=16, por_query=12, ffmpeg_exe=None):
                     "query": q,
                 }
 
-    # Diversifica: no máximo 2 vídeos por canal, mistura grandes e pequenos
+    hist = _load_v5_history()
+    used_ids = set(hist.get("used_video_ids") or [])
     per_ch = {}
     cands = []
     for c in sorted(found.values(), key=lambda x: x["views"], reverse=True):
+        if c["id"] in used_ids:
+            continue
         ch = c["channel"]
         if per_ch.get(ch, 0) >= 2:
             continue
@@ -333,4 +360,8 @@ def pesquisar_do_zero(ffmpeg_exe):
     validados = baixar_e_validar_momentos(momentos, by_id, ffmpeg_exe)
     with open(os.path.join(RESEARCH_DIR, "pauta.json"), "w", encoding="utf-8") as f:
         json.dump({"pauta": pauta, "validados": validados}, f, ensure_ascii=False, indent=2)
+    _save_v5_history(
+        [m.get("video_id") for m in validados],
+        topic=(pauta.get("pauta_longo") or {}).get("tema"),
+    )
     return pauta, validados
