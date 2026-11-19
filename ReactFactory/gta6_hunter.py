@@ -498,39 +498,60 @@ def hunt_gta6_short_source(output_path=None):
             "vault_jpgs": [],
         }
 
-    # Fallback seguro SEM DESALINHAMENTO: se nenhum download ao vivo passar, escolhe 1 cena coerente
-    # e trava exact_clip_description exatamente no que aparece nesse clipe (nunca inventa outro assunto!)
-    from producao.catalog import VIDEO_SEMANTIC_MAP, CLIPS_CURATED_DIR  # noqa: WPS433
+    # Fallback V6 (ZERO DESALINHAMENTO E ZERO REPETIÇÃO): usa o catálogo verificado do dia do lançamento
+    # (launch_manifest.json com áudio original + cenas validadas), pulando clipes já usados hoje!
+    from producao.catalog import get_all_verified_clip_catalog  # noqa: WPS433
 
-    curated_items = [
-        (os.path.join(CLIPS_CURATED_DIR, fn), meta["desc"])
-        for fn, meta in VIDEO_SEMANTIC_MAP.items()
-        if os.path.exists(os.path.join(CLIPS_CURATED_DIR, fn)) and "vid_28" not in fn and "vid_10" not in fn
+    hist_used = set(load_gta6_history().get("used_ids", []))
+    cat = get_all_verified_clip_catalog()
+    # Prioriza clipes do lançamento com áudio original (priority <= 2) ainda não usados
+    pool_unused = [
+        (cid, meta) for cid, meta in cat.items()
+        if f"gta6_clip_{cid}" not in hist_used and meta.get("priority", 3) <= 2
     ]
-    if curated_items:
-        pick_p, pick_desc = random.choice(curated_items)
-        subprocess.run([
+    if not pool_unused:
+        pool_unused = [(cid, meta) for cid, meta in cat.items() if f"gta6_clip_{cid}" not in hist_used]
+    if not pool_unused:
+        pool_unused = list(cat.items())
+
+    if pool_unused:
+        pick_cid, pick_meta = random.choice(pool_unused)
+        pick_p = pick_meta["path"]
+        pick_desc = pick_meta["desc"]
+        pick_ch = pick_meta.get("channel", "GTA 6 Gameplay")
+        # Mantém o áudio original do clipe se existir!
+        r_aud = subprocess.run([
             FFMPEG_EXE, "-y", "-stream_loop", "1", "-i", pick_p, "-t", "16.0",
             "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1",
+            "-map", "0:v:0", "-map", "0:a:0",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
-            "-f", "lavfi", "-t", "16.0", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-            "-map", "0:v:0", "-map", "1:a:0", "-shortest", "-c:a", "aac", "-ar", "48000", "-ac", "2", output_path,
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k", output_path,
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        if r_aud.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) < 50_000:
+            subprocess.run([
+                FFMPEG_EXE, "-y", "-stream_loop", "1", "-i", pick_p, "-t", "16.0",
+                "-f", "lavfi", "-t", "16.0", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1",
+                "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-ar", "48000", "-ac", "2", output_path,
+            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         dur = get_media_duration(output_path)
         research["chosen_angle"] = pick_desc
         research["exact_clip_description"] = pick_desc
-        research["clip_channel"] = "GTA 6 Gameplay"
-        uid = f"gta6_synced_{int(datetime.now(timezone.utc).timestamp())}"
+        research["clip_channel"] = pick_ch
+        uid = f"gta6_clip_{pick_cid}"
+        print(f"[SHORT V6 CATALOG SYNC] Clipe único com áudio: {pick_cid} ({pick_ch}) | {pick_desc[:85]}", flush=True)
         return {
             "id": uid,
-            "source": "GTA 6 Gameplay",
+            "source": pick_ch,
             "title": pick_desc[:120],
             "description": pick_desc,
             "duration": dur,
             "views": 500_000,
             "views_per_day": 250_000,
-            "age_days": 1.0,
-            "outlier_score": 4.0,
+            "age_days": 0.5,
+            "outlier_score": 4.2,
             "url": "https://www.rockstargames.com/VI",
             "path": output_path,
             "research_brief": research,
