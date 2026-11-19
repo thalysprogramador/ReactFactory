@@ -590,7 +590,6 @@ const DataComparison3DView: React.FC<{ props: SceneProps; frame: number; fps: nu
 export const GtaStudioScene: React.FC<SceneProps> = (props) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const badge = BADGE_STYLE[props.badgeType] || BADGE_STYLE.OFICIAL;
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#060911", fontFamily: "PoppinsStudioBold, sans-serif" }}>
@@ -601,55 +600,6 @@ export const GtaStudioScene: React.FC<SceneProps> = (props) => {
       {(props.sceneType === "data_comparison" || props.sceneType === "feature_spotlight" || props.sceneType === "cinema_broll") && (
         <DataComparison3DView props={props} frame={frame} fps={fps} />
       )}
-
-      {/* Barra Editorial Minimalista no Topo */}
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 68,
-          padding: "0 48px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          background: "linear-gradient(180deg, rgba(6,9,17,0.88) 0%, rgba(6,9,17,0.0) 100%)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "8px 18px",
-            borderRadius: 8,
-            background: "rgba(9,13,22,0.82)",
-            backdropFilter: "blur(12px)",
-            border: "1px solid rgba(255,255,255,0.14)",
-          }}
-        >
-          <div style={{ width: 9, height: 9, borderRadius: "50%", background: badge.dot, boxShadow: `0 0 10px ${badge.dot}` }} />
-          <span style={{ fontFamily: "PoppinsStudioBlack", fontSize: 14, color: "#FFFFFF", letterSpacing: 1.5 }}>{badge.label}</span>
-          <span style={{ color: "rgba(255,255,255,0.25)" }}>|</span>
-          <span style={{ fontFamily: "PoppinsStudioBold", fontSize: 14, color: "#CBD5E1" }}>{props.sourceLabel}</span>
-        </div>
-
-        <div
-          style={{
-            padding: "8px 18px",
-            borderRadius: 8,
-            background: "rgba(9,13,22,0.82)",
-            border: "1px solid rgba(255,255,255,0.12)",
-            fontFamily: "PoppinsStudioBold",
-            fontSize: 14,
-            color: "#FFBE0B",
-            letterSpacing: 1.8,
-          }}
-        >
-          CAPÍTULO 0{props.actNum} • {(props.actTitle || "GTA VI").toUpperCase()}
-        </div>
-      </div>
     </AbsoluteFill>
   );
 };
