@@ -66,21 +66,12 @@ def run_gta6_long_pipeline(do_upload=False):
         script_data = generate_gta6_long_script(research)
         script_data["acts"] = AgenteDiretorCriativo.enriquecer_storyboard(script_data.get("acts", []), formato="long")
 
-    # Injeta os clipes reais validados (COM ÁUDIO ORIGINAL) nos blocos correspondentes e na thumbnail
+    # Define thumb_hero_path apenas se tivermos um momento ao vivo validado de altíssima nota visual (>= 9);
+    # caso contrário, deixa a seleção semântica de `studio_composer.py` escolher a imagem exata pelo tema do título!
     if v5_momentos:
-        by_mid = {m["mid"]: m for m in v5_momentos if m.get("clip") and os.path.exists(m["clip"])}
-        ordered_clips = [m["clip"] for m in v5_momentos if m.get("clip") and os.path.exists(m["clip"])]
-        if ordered_clips:
-            best_m = max(v5_momentos, key=lambda m: int((m.get("validacao") or {}).get("nota_visual", 0) or 0))
-            script_data["thumb_hero_path"] = best_m.get("clip") or ordered_clips[0]
-            c_idx = 0
-            for act in script_data.get("acts", []):
-                for blk in act.get("blocks", []):
-                    mid = blk.get("moment_id")
-                    m_clip = by_mid[mid]["clip"] if (mid and mid in by_mid) else ordered_clips[c_idx % len(ordered_clips)]
-                    c_idx += 1
-                    blk["video_clips"] = [m_clip]
-                    blk["sync_lock"] = True
+        best_m = max(v5_momentos, key=lambda m: int((m.get("validacao") or {}).get("nota_visual", 0) or 0))
+        if int((best_m.get("validacao") or {}).get("nota_visual", 0) or 0) >= 9 and best_m.get("clip") and os.path.exists(best_m["clip"]):
+            script_data["thumb_hero_path"] = best_m["clip"]
 
     with open(os.path.join(work_dir, "script_gta6_long.json"), "w", encoding="utf-8") as sf:
         json.dump(script_data, sf, indent=2, ensure_ascii=False)
