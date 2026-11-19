@@ -46,6 +46,8 @@ jobs:
           KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           YOUTUBE_TOKEN_BASE64: ${{ secrets.YOUTUBE_TOKEN_BASE64 }}
+          YOUTUBE_TOKEN_2_BASE64: ${{ secrets.YOUTUBE_TOKEN_2_BASE64 }}
+          YOUTUBE_TOKEN_3_BASE64: ${{ secrets.YOUTUBE_TOKEN_3_BASE64 }}
           YOUTUBE_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
         run: |
           python -u ReactFactory/gta6_long_pipeline.py --upload
