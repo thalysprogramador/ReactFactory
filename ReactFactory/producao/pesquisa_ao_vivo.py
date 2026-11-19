@@ -51,11 +51,14 @@ def _ensure_cookies_file():
 
 
 def _ytdlp_cmd(with_cookies=True):
-    cmd = list(YTDLP) + ["--extractor-args", "youtube:player_client=android_vr,tv,web,mweb"]
-    if with_cookies:
-        ck = _ensure_cookies_file()
-        if ck:
-            cmd += ["--cookies", ck]
+    cmd = list(YTDLP)
+    ck = _ensure_cookies_file() if with_cookies else None
+    if ck:
+        # Clientes compatíveis com cookies autenticados
+        cmd += ["--cookies", ck, "--extractor-args", "youtube:player_client=web,mweb"]
+    else:
+        # Clientes sem cookies
+        cmd += ["--extractor-args", "youtube:player_client=tv,android_vr,ios"]
     return cmd
 
 
