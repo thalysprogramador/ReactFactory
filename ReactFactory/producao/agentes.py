@@ -137,41 +137,48 @@ class AgentePesquisadorRoteirista:
         )
         angle = research_data.get("chosen_angle", "GTA 6 LANÇADO: O MELHOR DAS LIVES DO DAVY JONES E BISTECONE EM VICE CITY")
 
-        prompt = f"""Você é o AGENTE 2 (Pesquisador-Chefe e Roteirista Viral) de uma produtora audiovisual profissional especializada em GTA 6.
-Contexto temporal: O GTA 6 JÁ FOI LANÇADO e os maiores streamers do Brasil — DAVY JONES (Gameplayrj), BISTECONE, SANINPLAY, FLOW GAMES, ALANZOKA e MAXMRM — estão EM LIVE AGORA MESMO jogando as primeiras horas reais em Vice City e Leonida!
+        v5_moms = research_data.get("v5_momentos") or []
+        v5_txt = "\n".join(
+            f"- [{m.get('mid')}] (Canal: {m.get('canal')}, Assunto: {m.get('assunto')}) {m.get('descricao_real')}"
+            for m in v5_moms[:10]
+        )
+
+        prompt = f"""Você é o AGENTE 2 (Pesquisador-Chefe e Roteirista) de um canal brasileiro de GTA 6 com edição 100% humanizada.
+Contexto: O GTA 6 acabou de ser lançado. Acabamos de pesquisar do zero dezenas de vídeos recém-postados e lives no ar (de criadores grandes e pequenos) e separamos cenas reais validadas do jogo.
 
 PAUTA PRINCIPAL: "{angle}"
 
-LIVES E VÍDEOS MONITORADOS AGORA:
+CENAS REAIS DO JOGO VALIDADAS AGORA (COM ÁUDIO ORIGINAL):
+{v5_txt}
+
+OUTRAS REFERÊNCIAS RECENTES:
 {refs_txt}
 {news_txt}
 
-REGRAS EDITORIAIS E DE RETENÇÃO VIRAL OBRIGATÓRIAS:
-1. GANCHO ULTRA APELATIVO NO ATO 1 BLOCO 1 (0 a 15 segundos):
-   - Proibido começar com "Olá pessoal" ou introduções lentas.
-   - Comece direto no momento mais chocante das lives (ex: "O Davy Jones e o Bistecone simplesmente travaram ao vivo quando abriram o celular da Lucia e viram o que acontece na primeira missão do GTA 6...").
-2. CONTEÚDO 100% SOBRE O JOGO LANÇADO E AS LIVES:
-   - Analise as primeiras missões de Lucia e Jason (incluindo o início na prisão e a chegada a Vice City), a reação do Bistecone pilotando lanchas em Leonida Keys, a reação do Davy Jones testando a física RAGE 9 e as funções secretas do celular e redes sociais dentro do jogo.
-3. Cada bloco DEVE ter:
-   - "badge_type": "OFICIAL" (Gameplay Real PS5 Pro / Rockstar), "CONFIRMADO" (Verificado nas Lives de Davy Jones / Bistecone / Flow Games), "RUMOR" ou "ANALISE".
-   - "source_label": origem exata (ex: "Live Gameplayrj (Davy Jones) // GTA VI PS5 Pro", "Live Bistecone // Primeira Missão GTA VI", "Live SanInPlay & Flow Games // Vice City").
-4. Escreva a narração ("narration") para soar 100% HUMANA, magnética, ritmo acelerado de grande canal gamer brasileiro. Use perguntas retóricas, pausas dramáticas ("...") e zero clichês robóticos.
-5. COERÊNCIA VISUAL TOTAL: para cada bloco, defina:
-   - "scene_type": "cinema_broll" na maioria dos blocos (75-80%), e use "map_zoom" (quando falar de regiões de Leonida), "character_dossier" (quando falar de Lucia, Jason, Raul Bautista) ou "data_comparison" (quando comparar GTA V vs GTA VI ou recordes de audiência das lives) no máximo 1 vez por Ato.
-   - "location_key": "vice_city", "leonida_keys", "grassrivers", "port_gellhorn", "ambrosia" ou "mount_kalaga".
-6. TÍTULO, THUMBNAIL E TAGS DE ALTO CTR (META >= 80% DE CHANCE DE VIRALIZAR):
-   - "long_title": Título ultra apelativo (50 a 78 caracteres) citando GTA 6 + Davy Jones / Bistecone ou a descoberta mais absurda da gameplay.
-   - "thumb_text": MÁXIMO 2 A 3 PALAVRAS GIGANTES DE IMPACTO (ex: "TRAVOU A LIVE!", "JOGO ABSURDO!", "OLHA ESSE CELULAR!").
-   - "thumb_subtext": Complemento de curiosidade extrema (ex: "DAVY JONES E BISTECONE EM CHOQUE NO GTA 6").
-7. Estrutura: {num_acts} Atos, cada Ato com exatamente {blocks_per_act} blocos de narração (cada bloco com 35 a 55 palavras, ~14 a 18 segundos de fala natural).
+REGRAS EDITORIAIS E DE RETENÇÃO OBRIGATÓRIAS:
+1. PROTAGONISTA 100% O JOGO (NÃO REAÇÕES DE STREAMERS):
+   - O foco central é O JOGO: novidades, o que existe dentro dele, cenas que despertam curiosidade, momentos mais loucos, segredos e bugs recém-descobertos.
+   - Cite criadores apenas como fonte natural quando fizer sentido (ex: "na live do canal X apareceu..."), nunca como o assunto principal do vídeo.
+2. GANCHO FORTE NOS PRIMEIROS 10 SEGUNDOS (ATO 1 BLOCO 1) + CTA NATURAL NO FINAL:
+   - Proibido começar com "Olá pessoal" ou introduções genéricas. Vá direto para a descoberta mais absurda do jogo.
+   - Encaixe uma CTA natural no último bloco pedindo opinião nos comentários e inscrição.
+3. NARRAÇÃO 100% HUMANA E FLUIDA:
+   - Escreva como um gamer/criador brasileiro natural falando com a audiência, sem clichês de IA.
+4. COERÊNCIA VISUAL TOTAL:
+   - Para cada bloco, defina "scene_type": "cinema_broll" em 75% a 80% dos blocos (usando os clipes reais validados com áudio original!), e use "map_zoom" (nosso voo de satélite 3D sobre Leonida), "character_dossier" ou "data_comparison" no máximo 1 vez por Ato, apenas quando agregar valor.
+   - Se o bloco ilustrar uma das CENAS REAIS listadas acima, coloque o "mid" correspondente no campo "moment_id" (ex: "m8").
+5. THUMBNAIL 100% FOCADA NO JOGO (ZERO STREAMERS, ZERO 'AO VIVO' / 'LIVES'):
+   - "thumb_text": 2 a 4 palavras extremamente chamativas tiradas diretamente da descoberta do jogo (ex: "BEBÊS NO GTA 6?", "TIGRE ESCONDIDO!", "BUG QUEBROU TUDO!").
+   - "thumb_subtext": Frase curta complementar sobre o jogo (máx 40 chars).
+6. Estrutura: {num_acts} Atos, cada Ato com exatamente {blocks_per_act} blocos de narração (cada bloco com 32 a 50 palavras).
 
 Retorne APENAS JSON válido no formato:
 {{
-  "long_title": "Título magnético de alto CTR (máx 82 chars)",
-  "long_description": "Descrição editorial rica com destaques das lives e contexto",
-  "long_tags": ["gta 6", "gta vi", "gta 6 gameplay", "davy jones gta 6", "bistecone gta 6", "gameplayrj gta 6", "gta 6 ao vivo", "gta 6 inicio", "vice city", "leonida", "lucia e jason", "saninplay gta 6", "flow games gta 6", "gta 6 ps5 pro"],
-  "thumb_text": "TRAVOU A LIVE!",
-  "thumb_subtext": "DAVY JONES E BISTECONE EM CHOQUE NO GTA 6",
+  "long_title": "Título magnético focado no jogo (máx 82 chars)",
+  "long_description": "Descrição natural com os destaques descobertos no GTA 6",
+  "long_tags": ["gta 6", "gta vi", "gta 6 gameplay", "gta 6 segredos", "gta 6 bugs", "gta 6 detalhes", "vice city", "leonida", "rockstar games"],
+  "thumb_text": "QUEBRARAM O TABU!",
+  "thumb_subtext": "O QUE ACHARAM DENTRO DO GTA 6",
   "acts": [
     {{
       "act_num": 1,
@@ -179,22 +186,23 @@ Retorne APENAS JSON válido no formato:
       "bgm_mood": "synth",
       "blocks": [
         {{
-          "narration": "Texto falado natural em PT-BR...",
-          "headline": "TÍTULO DO CARD NA TELA",
+          "narration": "Texto falado natural em PT-BR focado no jogo...",
+          "headline": "TÍTULO DISCRETO DO TÓPICO",
           "subheadline": "Complemento informativo curto",
-          "callout": "LIVE DAVY JONES",
-          "badge_type": "CONFIRMADO",
-          "source_label": "Live Gameplayrj (Davy Jones) & Bistecone // GTA VI",
+          "callout": "VICE CITY",
+          "moment_id": "m8",
+          "badge_type": "OFICIAL",
+          "source_label": "Gameplay GTA VI",
           "scene_type": "cinema_broll",
           "location_key": "vice_city",
           "character_name": "LUCIA & JASON",
-          "character_role": "Protagonistas Centrais",
-          "character_facts": ["Início na penitenciária de Leonida", "Fuga e primeiro assalto em Vice City"],
-          "stat_value": "9.4M+",
-          "stat_unit": "VIEWS NAS LIVES",
+          "character_role": "Protagonistas",
+          "character_facts": ["Fato 1", "Fato 2"],
+          "stat_value": "175 km²",
+          "stat_unit": "MAPA DE LEONIDA",
           "comparison_items": [
-            {{"label": "GTA V (2013)", "value": 45, "display": "Física RAGE 7"}},
-            {{"label": "GTA VI (2026)", "value": 100, "display": "Física RAGE 9 Realista"}}
+            {{"label": "GTA V (2013)", "value": 42, "display": "Los Santos"}},
+            {{"label": "GTA VI (2026)", "value": 100, "display": "Estado de Leonida"}}
           ]
         }}
       ]
