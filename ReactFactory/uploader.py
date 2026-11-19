@@ -138,7 +138,7 @@ def upload_short_to_youtube(video_path, title, description, tags=None, privacy_s
             "title": title[:100],
             "description": description,
             "tags": tags or ["shorts", "gta 6", "viral", "curiosidades"],
-            "categoryId": "24",
+            "categoryId": "20",  # Gaming / Jogos
             "defaultLanguage": "pt-BR",
             "defaultAudioLanguage": "pt-BR",
         },
@@ -191,7 +191,7 @@ def upload_long_to_youtube(video_path, title, description, tags=None, thumb_path
             "title": (title or "GTA 6 NOVIDADES!")[:100],
             "description": description or "",
             "tags": (tags or ["gta 6", "gta vi", "rockstar games", "games"])[:25],
-            "categoryId": "24",
+            "categoryId": "20",  # Gaming / Jogos
             "defaultLanguage": "pt-BR",
             "defaultAudioLanguage": "pt-BR",
         },
