@@ -79,8 +79,8 @@ def run_gta6_long_pipeline(do_upload=False):
                     mid = blk.get("moment_id")
                     m_clip = by_mid[mid]["clip"] if (mid and mid in by_mid) else ordered_clips[c_idx % len(ordered_clips)]
                     c_idx += 1
-                    existing_v = list(blk.get("video_clips") or [])
-                    blk["video_clips"] = [m_clip] + [v for v in existing_v if v != m_clip][:2]
+                    blk["video_clips"] = [m_clip]
+                    blk["sync_lock"] = True
 
     with open(os.path.join(work_dir, "script_gta6_long.json"), "w", encoding="utf-8") as sf:
         json.dump(script_data, sf, indent=2, ensure_ascii=False)
