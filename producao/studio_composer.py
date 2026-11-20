@@ -173,57 +173,11 @@ def _build_top_editorial_bar(badge_type, source_label, act_num, total_acts, act_
 
 def _draw_lower_third_and_hud(frame_bgr, top_hud_strip, headline, subheadline, callout, f_idx, show_lower_third=True):
     """
-    Visual Humanizado V5:
-    - ZERO tarjas/selos artificiais no topo da tela ('CONFIRMADO', 'VERIFICADO', etc. removidos).
-    - Apenas nos primeiros 3.5s de um novo tópico, exibe um Lower-Third discreto e limpo no canto inferior esquerdo.
+    Visual Cinema Limpo V7.1 (pós-auditoria Agente 5):
+    - ZERO tarjas escuras pesadas no canto inferior nem selos artificiais no topo (poluíam a tela junto com as legendas!).
+    - A tela fica 100% limpa na gameplay Full-HD, destacando apenas as legendas Poppins-Black sincronizadas.
     """
-    out = frame_bgr.copy()
-    if not show_lower_third:
-        return out
-
-    # Entrada suave nos primeiros 12 frames e saída suave nos últimos 12 frames da janela de 86 frames (~3.5s)
-    if f_idx < 12:
-        p = f_idx / 12.0
-    elif f_idx > 74:
-        p = max(0.0, (86 - f_idx) / 12.0)
-    else:
-        p = 1.0
-    ease = 1.0 - (1.0 - p) ** 3
-    x_off = int(-480 * (1.0 - ease))
-    alpha_mul = max(0.0, min(1.0, ease))
-
-    img_pil = Image.fromarray(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(img_pil, "RGBA")
-    f_tag = load_font(17, style="poppins")
-    f_head = load_font(44, style="anton")
-    f_sub = load_font(19, style="poppins")
-
-    bx0 = 48 + x_off
-    by0 = 758
-    bw = 740
-    bh = 132
-
-    bg_a = int(214 * alpha_mul)
-    bd_a = int(42 * alpha_mul)
-    ac_a = int(255 * alpha_mul)
-    tx_a = int(250 * alpha_mul)
-    sb_a = int(205 * alpha_mul)
-
-    draw.rounded_rectangle(
-        [bx0, by0, bx0 + bw, by0 + bh],
-        radius=12,
-        fill=(8, 11, 18, bg_a),
-        outline=(255, 255, 255, bd_a),
-        width=1,
-    )
-    draw.rounded_rectangle([bx0, by0 + 12, bx0 + 5, by0 + bh - 12], radius=2, fill=(255, 190, 11, ac_a))
-
-    tag_str = _clean_ascii(callout or "GTA VI").upper()
-    draw.text((bx0 + 24, by0 + 12), tag_str[:50], font=f_tag, fill=(255, 190, 11, ac_a))
-    draw.text((bx0 + 24, by0 + 36), _clean_ascii(headline).upper()[:42], font=f_head, fill=(248, 250, 252, tx_a))
-    draw.text((bx0 + 24, by0 + 92), _clean_ascii(subheadline)[:68], font=f_sub, fill=(148, 163, 184, sb_a))
-
-    return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+    return frame_bgr
 
 
 def _draw_word_caption_pil(frame_bgr, words, t_sec):
