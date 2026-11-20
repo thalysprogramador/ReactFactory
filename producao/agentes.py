@@ -374,6 +374,8 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
     words_map = {}
     engine_counts = {}
     last_gemini_call_t = 0.0
+    gemini_consec_fails = 0
+    force_uniform_edge = False
 
     for idx, blk in enumerate(blocks):
         bid = blk["id"]
@@ -383,44 +385,52 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
 
         if not (os.path.exists(out_wav) and os.path.getsize(out_wav) > 15_000):
             ok = False
-            # Cadenciamento automático (4.3s entre chamadas Gemini TTS -> fica abaixo do limite 15 RPM, ZERO erro 429, voz 100% consistente!)
-            if last_gemini_call_t > 0:
-                elapsed = time.time() - last_gemini_call_t
-                if elapsed < 4.3:
-                    time.sleep(4.3 - elapsed)
+            # Circuit-breaker anti-429: se cota diária do Gemini TTS estourou (2 falhas seguidas),
+            # pula direto para Edge-TTS Neural em 100% dos blocos (evita perder 45 min em retries e evita misturar 2 vozes!)
+            if not force_uniform_edge:
+                if last_gemini_call_t > 0:
+                    elapsed = time.time() - last_gemini_call_t
+                    if elapsed < 4.3:
+                        time.sleep(4.3 - elapsed)
 
-            # Camada 1: Gemini Flash TTS (voz humana PT-BR 'Orus' 100% consistente do início ao fim)
-            try:
-                last_gemini_call_t = time.time()
-                payload = {
-                    "contents": [{"parts": [{"text": clean_text}]}],
-                    "generationConfig": {
-                        "responseModalities": ["AUDIO"],
-                        "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice_name}}},
-                    },
-                }
-                resp = gemini_generate(
-                    payload,
-                    models=["gemini-2.5-flash-preview-tts", "gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview"],
-                    attempts_per_model=3,
-                    timeout=90,
-                    verbose=False,
-                )
-                pcm_b64 = resp["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
-                pcm_bytes = base64.b64decode(pcm_b64)
-                with wave.open(raw_wav, "wb") as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(24000)
-                    wf.writeframes(pcm_bytes)
-                _master_voice_wav(raw_wav, out_wav)
-                ok = os.path.exists(out_wav) and get_audio_duration(out_wav) > 1.2
-                m_used = resp.get("_model", "gemini-2.5-flash-preview-tts")
-                engine_counts[m_used] = engine_counts.get(m_used, 0) + 1
-            except Exception as e_gem:
-                print(f"[VOICE STUDIO] Aviso Gemini TTS no bloco {bid} ({e_gem}) -> fallback Edge-TTS Neural", flush=True)
+                # Camada 1: Gemini Flash TTS (voz humana PT-BR 'Orus' 100% consistente)
+                try:
+                    last_gemini_call_t = time.time()
+                    payload = {
+                        "contents": [{"parts": [{"text": clean_text}]}],
+                        "generationConfig": {
+                            "responseModalities": ["AUDIO"],
+                            "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice_name}}},
+                        },
+                    }
+                    resp = gemini_generate(
+                        payload,
+                        models=["gemini-2.5-flash-preview-tts", "gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview"],
+                        attempts_per_model=2,
+                        timeout=75,
+                        verbose=False,
+                    )
+                    pcm_b64 = resp["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
+                    pcm_bytes = base64.b64decode(pcm_b64)
+                    with wave.open(raw_wav, "wb") as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(24000)
+                        wf.writeframes(pcm_bytes)
+                    _master_voice_wav(raw_wav, out_wav)
+                    ok = os.path.exists(out_wav) and get_audio_duration(out_wav) > 1.2
+                    if ok:
+                        gemini_consec_fails = 0
+                        m_used = resp.get("_model", "gemini-2.5-flash-preview-tts")
+                        engine_counts[m_used] = engine_counts.get(m_used, 0) + 1
+                except Exception as e_gem:
+                    gemini_consec_fails += 1
+                    print(f"[VOICE STUDIO] Aviso Gemini TTS no bloco {bid} ({e_gem}) -> fallback Edge-TTS Neural", flush=True)
+                    if gemini_consec_fails >= 2:
+                        force_uniform_edge = True
+                        print("[VOICE STUDIO] Cota diária Gemini TTS atingida -> padronizando 100% dos blocos em Edge-TTS Neural (voz única e rápida!)", flush=True)
 
-            # Camada 2: Fallback garantido Edge-TTS Neural masterizado (Chatterbox HF ZeroGPU removido pois sempre estourava cota)
+            # Camada 2: Fallback garantido Edge-TTS Neural masterizado
             if not ok:
                 mp3_tmp = os.path.join(work_dir, f"tmp_{bid}.mp3")
                 _call_edge_tts(clean_text, mp3_tmp, rate="+5%")
@@ -443,6 +453,22 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
             span = dur / float(max(1, len(raw_words)))
             w_ts = [{"w": w, "s": round(i * span, 2), "e": round((i + 1) * span, 2)} for i, w in enumerate(raw_words)]
         words_map[bid] = w_ts
+
+    # Se caiu em force_uniform_edge no meio e havia poucos blocos anteriores em Gemini, padroniza TODOS em Edge-TTS
+    if force_uniform_edge and any(k != "edge_tts" for k in engine_counts):
+        print("[VOICE STUDIO] Uniformizando blocos iniciais para Edge-TTS Neural (zero troca de voz no mesmo vídeo!)", flush=True)
+        for blk in blocks:
+            bid = blk["id"]
+            out_wav = wav_map[bid]
+            clean_text = normalize_ptbr_phonetics(blk["narration"])
+            mp3_tmp = os.path.join(work_dir, f"tmp_uni_{bid}.mp3")
+            _call_edge_tts(clean_text, mp3_tmp, rate="+5%")
+            _master_voice_wav(mp3_tmp, out_wav)
+            if os.path.exists(mp3_tmp):
+                os.remove(mp3_tmp)
+            dur = get_audio_duration(out_wav)
+            words_map[bid] = extract_word_timestamps(out_wav, ffmpeg_exe, reference_text=blk["narration"])
+        engine_counts = {"edge_tts_uniform": len(blocks)}
 
     engine_used = ", ".join(f"{k}:{v}" for k, v in engine_counts.items()) or "gemini-2.5-flash-preview-tts"
     return wav_map, words_map, engine_used
