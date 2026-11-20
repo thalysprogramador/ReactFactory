@@ -270,11 +270,13 @@ def get_all_verified_clip_catalog(v5_momentos=None):
             }
 
     # 2. Clipes reais do dia do lançamento validados visualmente (launch_manifest.json)
-    # Exclui explicitamente telas de logo GTA VI, trailers oficiais e câmera estática
+    # Exclui explicitamente telas de logo GTA VI, trailers oficiais e câmera de apresentador falando (sem gameplay pura!)
     skip_files = {
         "gta6_vid_10.mp4",
         "gta6_vid_28.mp4",
         "gta6_live_flowgames_01.mp4",
+        "gta6_live_davyjones_01.mp4",
+        "launch_v5_m1.mp4",
         "launch_v5_m3.mp4",
         "launch_v5_m7.mp4",
     }
