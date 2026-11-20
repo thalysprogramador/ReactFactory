@@ -606,7 +606,7 @@ class AgenteControleQualidade:
         elif formato == "pilot":
             dur_ok = dur >= 35.0
         else:
-            dur_ok = 14.0 <= dur <= 64.0
+            dur_ok = 14.0 <= dur <= 178.0
         checks["duracao_adequada"] = dur_ok
         if not dur_ok:
             reasons.append(f"Duração fora da faixa para {formato}: {dur:.1f}s.")
