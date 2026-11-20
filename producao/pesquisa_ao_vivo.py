@@ -422,6 +422,7 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
         prompt = (f"Estas são 4 imagens em ordem de um trecho de vídeo de GTA 6. Descrição esperada: '{m['o_que_acontece']}'.\n"
                   "Responda APENAS um objeto JSON: {\"e_gameplay\": true/false (true SOMENTE se mostra gameplay real do jogo, false se for só webcam/menu/tela preta/estática), "
                   "\"tem_logo_ou_trailer\": true/false (true se aparecer logo gigante 'Grand Theft Auto VI', tela de pré-venda, contagem regressiva ou cartela oficial de trailer), "
+                  "\"tem_overlay_poluido\": true/false (true se a tela estiver poluída com QR codes, banners de patrocinador, tarjas gigantes ou facecam ocupando grande parte da tela), "
                   "\"bate_com_descricao\": true/false, \"descricao_real\": \"o que realmente aparece no jogo, objetivo, 1 frase\", "
                   "\"nota_visual\": 1-10 (impacto/curiosidade da cena), \"frase_thumb\": \"2 a 4 palavras de impacto sobre a cena\", "
                   "\"regiao\": \"vice_city|leonida_keys|grassrivers|port_gellhorn|ambrosia|mount_kalaga|nenhuma\"}")
@@ -436,8 +437,9 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
         # Sobrescreve o_que_acontece com o que o Gemini REALMENTE VIU nos frames do clipe (evita narração desalinhada!)
         m["o_que_acontece"] = m["descricao_real"]
         has_logo = bool(v.get("tem_logo_ou_trailer"))
-        aprovado = bool(v.get("e_gameplay")) and (not has_logo) and int(v.get("nota_visual", 0) or 0) >= 6
-        print(f"[VALIDAÇÃO] {m['mid']} ({m['canal']}) gameplay={v.get('e_gameplay')} logo={has_logo} bate={v.get('bate_com_descricao')} "
+        has_clutter = bool(v.get("tem_overlay_poluido"))
+        aprovado = bool(v.get("e_gameplay")) and (not has_logo) and (not has_clutter) and int(v.get("nota_visual", 0) or 0) >= 6
+        print(f"[VALIDAÇÃO] {m['mid']} ({m['canal']}) gameplay={v.get('e_gameplay')} logo={has_logo} clutter={has_clutter} bate={v.get('bate_com_descricao')} "
               f"nota={v.get('nota_visual')} -> {'OK' if aprovado else 'DESCARTADO'} | {m['descricao_real']}", flush=True)
         if aprovado:
             validados.append(m)
