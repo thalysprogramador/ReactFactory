@@ -683,9 +683,12 @@ As {len(frames_b64)} imagens anexadas estão em ordem cronológica exata: {ts_la
 TÍTULO DO VÍDEO: "{title_ref}"
 GANCHO / ROTEIRO DE ABERTURA: "{hook_ref}"
 
+CONTEXTO TEMPORAL OBRIGATÓRIO: Estamos em 19 de Novembro de 2026 — GTA 6 FOI LANÇADO OFICIALMENTE HOJE! NUNCA acuse cenas reais de gameplay/easter eggs/bugs bizarros de GTA 6 de serem "mod de GTA V" ou "clickbait porque GTA 6 não saiu".
+ESTILO DE LEGENDA PADRÃO DO CANAL: Nossas legendas estilo CapCut/Broadcast exibem 2 a 3 palavras grandes sincronizadas com a voz por vez (palavra ativa em amarelo). Isso é INTENCIONAL para retenção — NÃO reprove por aparecerem poucas palavras por frame; reprove APENAS se o texto estiver cortado fora da tela, ilegível ou cobrindo o rosto/ação central.
+
 AUDITE RIGOROSAMENTE ESTES 5 CRITÉRIOS VISUAIS (NÃO PASSE PANO — REPROVE SE ESTIVER RUIM!):
 1. `abertura_limpa_sem_logo_ou_cartela`: Os frames iniciais (#1 e #2, primeiros 0-3s) mostram GAMEPLAY REAL em ação?
-   - Marque `false` SE aparecer tela de logo gigante "Grand Theft Auto VI", cartela borrada estática de "CAPÍTULO 1", tela de pré-venda ou trailer velho na abertura!
+   - Marque `false` SE aparecer tela de logo gigante "Grand Theft Auto VI", cartela borrada estática de "CAPÍTULO 1", apresentador em tela cheia falando sem gameplay, tela de pré-venda ou trailer velho na abertura!
 2. `sem_cenas_repetidas_ou_estaticas`: {"Para SHORT (25-45s), acompanhar uma única cena/corte contínuo de live ou gameplay (ex: 1 momento viral de 20s) é NORMAL e APROVADO — reprove APENAS se a imagem ficar congelada/travada sem ação ou colar takes repetidos de forma quebrada." if formato == "short" else "Há variedade real de cenas/movimento ao longo do vídeo longo (reprove se os mesmos takes/cenas aparecerem repetidos ou se houver cartelas estáticas quebrando o ritmo)."}
 3. `coerencia_visual_com_roteiro`: As cenas exibidas nos frames têm relação real com o tema do título e do gancho (reprove se for clickbait desconexo)?
 4. `qualidade_visual_e_legendas`: As legendas estão limpas/legíveis, sem cortes grotescos, sem tarjas artificiais de IA feias no topo ("CONFIRMADO/VERIFICADO"), e o enquadramento está limpo?
