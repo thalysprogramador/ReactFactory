@@ -37,19 +37,28 @@ def run_gta6_long_pipeline(do_upload=False):
     work_dir = os.path.join(GTA6_TEMP_DIR, "long_work")
     os.makedirs(work_dir, exist_ok=True)
 
-    # ETAPAS 1-3: Pesquisa ampla do zero em tempo real (V5: vídeos recém-postados + lives no ar + áudio original)
+    # ETAPAS 1-3: Pesquisa ampla do zero em tempo real (V7.5 — OBRIGATÓRIO baixar clipes novos a cada produção!)
     research = research_gta6_references(kind="long")
     v5_momentos = []
-    try:
-        from producao.pesquisa_ao_vivo import pesquisar_do_zero  # noqa: WPS433
+    from producao.pesquisa_ao_vivo import pesquisar_do_zero  # noqa: WPS433
 
-        pauta_v5, v5_momentos = pesquisar_do_zero(FFMPEG_EXE)
-        if v5_momentos:
-            research["v5_momentos"] = v5_momentos
-            if pauta_v5.get("pauta_longo", {}).get("tema"):
-                research["chosen_angle"] = pauta_v5["pauta_longo"]["tema"]
-    except Exception as err_v5:
-        print(f"[PESQUISA V5] Aviso fallback: {err_v5}", flush=True)
+    for attempt_v5 in (1, 2):
+        try:
+            pauta_v5, v5_momentos = pesquisar_do_zero(FFMPEG_EXE)
+            if len(v5_momentos) >= 3:
+                research["v5_momentos"] = v5_momentos
+                if (pauta_v5.get("pauta_longo") or {}).get("tema"):
+                    research["chosen_angle"] = pauta_v5["pauta_longo"]["tema"]
+                break
+            print(f"[PESQUISA V5 LONGO] Tentativa {attempt_v5}/2 obteve apenas {len(v5_momentos)} clipes novos -> retentando busca...", flush=True)
+        except Exception as err_v5:
+            print(f"[PESQUISA V5 LONGO] Aviso tentativa {attempt_v5}/2: {err_v5}", flush=True)
+
+    if len(v5_momentos) < 3:
+        raise RuntimeError(
+            f"BLOQUEADO (ZERO REPETIÇÃO): Pesquisa ao vivo obteve apenas {len(v5_momentos)} clipes novos (mínimo 3). "
+            "Abortando produção para NUNCA subir vídeo longo só com clipes antigos repetidos!"
+        )
 
     mp4_vault, jpg_vault = sync_rockstar_gta6_vault(max_mp4=12, max_jpg=30)
 
