@@ -270,11 +270,23 @@ def get_all_verified_clip_catalog(v5_momentos=None):
             }
 
     # 2. Clipes reais do dia do lançamento validados visualmente (launch_manifest.json)
+    # Exclui explicitamente telas de logo GTA VI, trailers oficiais e câmera de apresentador falando (sem gameplay pura!)
+    skip_files = {
+        "gta6_vid_10.mp4",
+        "gta6_vid_28.mp4",
+        "gta6_live_flowgames_01.mp4",
+        "gta6_live_davyjones_01.mp4",
+        "launch_v5_m1.mp4",
+        "launch_v5_m3.mp4",
+        "launch_v5_m7.mp4",
+    }
     manifest_p = os.path.join(CLIPS_CURATED_DIR, "launch_manifest.json")
     if os.path.exists(manifest_p):
         try:
             mdata = json.load(open(manifest_p, encoding="utf-8"))
             for fn, info in mdata.items():
+                if fn in skip_files:
+                    continue
                 cp = os.path.join(CLIPS_CURATED_DIR, fn)
                 if os.path.exists(cp):
                     cid = os.path.splitext(fn)[0]
@@ -290,8 +302,7 @@ def get_all_verified_clip_catalog(v5_momentos=None):
         except Exception:
             pass
 
-    # 3. Clipes 1080p verificados quadro-a-quadro (exclui telas de pré-venda e câmera falando sem gameplay)
-    skip_files = {"gta6_vid_10.mp4", "gta6_vid_28.mp4", "gta6_live_flowgames_01.mp4"}
+    # 3. Clipes 1080p verificados quadro-a-quadro (exclui telas de pré-venda/logo e câmera falando sem gameplay)
     for fn, meta in VIDEO_SEMANTIC_MAP.items():
         if fn in skip_files:
             continue
@@ -344,8 +355,17 @@ def select_semantic_assets(blocks, prefer_horizontal=True, research_data=None, f
     if ffmpeg_exe and research_data:
         harvest_live_influencer_clips(research_data, ffmpeg_exe, max_new=6)
 
+    skip_files = {
+        "gta6_vid_10.mp4",
+        "gta6_vid_28.mp4",
+        "gta6_live_flowgames_01.mp4",
+        "launch_v5_m3.mp4",
+        "launch_v5_m7.mp4",
+    }
     available_vids = {}
     for fname, meta in VIDEO_SEMANTIC_MAP.items():
+        if fname in skip_files:
+            continue
         p = os.path.join(CLIPS_CURATED_DIR, fname)
         if os.path.exists(p):
             available_vids[fname] = (p, meta["tags"], meta["desc"])
