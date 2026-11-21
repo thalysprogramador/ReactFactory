@@ -88,67 +88,49 @@ def _clean_text(t):
     return "".join(c for c in (t or "") if ord(c) < 65000).strip()
 
 
-def draw_caption_chunk(frame_bgr, text, highlight_idx=0, y_center=1415):
+def draw_caption_chunk(frame_bgr, text, highlight_idx=0, y_center=1350):
     """
-    Legenda Viral Profissional V4 (Poppins-Black ExtraBold — Estilo Referência hz4KLLc4Q6Q + CapCut Pro):
+    Legenda Viral Limpa V7.2 (Poppins-Black — 1 linha compacta abaixo da gameplay, ZERO obstrução!):
     - ZERO caixa preta ou retângulo neon atrás do texto.
-    - 1 a 2 palavras gigantes por vez (fonte Poppins-Black 86px) com contorno suave + sombra projetada profunda.
-    - Destaque dinâmico em Ouro Elétrico (#FFE01B) na palavra ativa e Ciano (#00F5FF) em gatilhos.
+    - Até 3 palavras em 1 única linha limpa (60px / 52px) abaixo da janela de gameplay (y=1350),
+      destaque em Ouro Elétrico (#FFE01B) na palavra ativa e Branco Puro nas demais.
     """
-    words = _clean_text(text).upper().split()
+    words = _clean_text(text).upper().split()[:3]
     if not words:
         return frame_bgr
 
     img_pil = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil, "RGBA")
-    font = load_font(86 if len(" ".join(words)) <= 13 else 74, style="poppins")
+    full_line_str = " ".join(words)
+    f_size = 60 if len(full_line_str) <= 18 else (52 if len(full_line_str) <= 24 else 44)
+    font = load_font(f_size, style="poppins")
 
-    lines = []
-    curr = []
-    for idx, w in enumerate(words[:3]):
-        curr.append((w, idx == highlight_idx))
-        if len(curr) >= 2:
-            lines.append(curr)
-            curr = []
-    if curr:
-        lines.append(curr)
+    bbox = draw.textbbox((0, 0), full_line_str, font=font)
+    line_w = bbox[2] - bbox[0]
+    x_cursor = (1080 - line_w) // 2
+    y_cursor = y_center
 
-    y_cursor = y_center if len(lines) == 1 else (y_center - 48)
-
-    for line in lines[:2]:
-        full_line_str = " ".join(w for w, _ in line)
-        bbox = draw.textbbox((0, 0), full_line_str, font=font)
-        line_w = bbox[2] - bbox[0]
-        x_cursor = (1080 - line_w) // 2
-
-        for word_str, is_active in line:
-            clean_tok = word_str.strip(".,!?\"'")
-            if is_active:
-                color = (0, 245, 255, 255) if clean_tok in _POWER_WORDS else (255, 224, 27, 255)
-            else:
-                color = (255, 224, 27, 255) if clean_tok in _POWER_WORDS else (255, 255, 255, 255)
-
-            # Sombra projetada suave em 2 camadas para efeito cinema 3D
-            draw.text(
-                (x_cursor + 3, y_cursor + 9),
-                word_str,
-                font=font,
-                fill=(0, 0, 0, 195),
-                stroke_width=11,
-                stroke_fill=(0, 0, 0, 195),
-            )
-            draw.text(
-                (x_cursor, y_cursor),
-                word_str,
-                font=font,
-                fill=color,
-                stroke_width=8,
-                stroke_fill=(8, 10, 16, 255),
-            )
-            w_bbox = draw.textbbox((0, 0), word_str + " ", font=font)
-            x_cursor += w_bbox[2] - w_bbox[0]
-
-        y_cursor += 96
+    for idx, word_str in enumerate(words):
+        is_active = idx == highlight_idx
+        color = (255, 224, 27, 255) if is_active else (255, 255, 255, 255)
+        draw.text(
+            (x_cursor + 3, y_cursor + 6),
+            word_str,
+            font=font,
+            fill=(0, 0, 0, 215),
+            stroke_width=9,
+            stroke_fill=(0, 0, 0, 215),
+        )
+        draw.text(
+            (x_cursor, y_cursor),
+            word_str,
+            font=font,
+            fill=color,
+            stroke_width=6,
+            stroke_fill=(8, 10, 16, 255),
+        )
+        w_bbox = draw.textbbox((0, 0), word_str + " ", font=font)
+        x_cursor += w_bbox[2] - w_bbox[0]
 
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
@@ -446,10 +428,12 @@ def compose_react_short(
                 prog = outro_t / max(0.1, outro_dur)
                 caption_str, active_word_idx = get_active_chunk(outro_words, prog)
 
-        canvas = draw_top_headline(canvas, headline, progress_0_1=(t / max(0.1, t_total)))
+        # Título de gancho limpo APENAS nos primeiros segundos (desaparece após o gancho -> tela 100% limpa!)
+        if t < t_hook_end + 0.4:
+            canvas = draw_top_headline(canvas, headline, progress_0_1=(t / max(0.1, t_hook_end + 0.4)))
 
         if caption_str:
-            canvas = draw_caption_chunk(canvas, caption_str, active_word_idx, y_center=1230)
+            canvas = draw_caption_chunk(canvas, caption_str, active_word_idx, y_center=1350)
 
         writer.write(canvas)
 
