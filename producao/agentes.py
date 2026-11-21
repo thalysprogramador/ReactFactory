@@ -95,15 +95,25 @@ class AgenteDiretorCriativo:
                         remotion_used_in_act = True
                         used_remotion_types.add(st)
 
-                # Trava 1-para-1 do clipe real validado (ZERO repetição + prioridade máxima para clipes novos ao vivo!)
+                # Trava 1-para-1 do clipe real validado (ZERO repetição + Ato 1 OBRIGATORIAMENTE usa clipes novos live_*!)
+                live_cids = {cid for cid, m in clip_catalog.items() if int(m.get("priority", 3)) == 1}
                 chosen_cid = blk.get("clip_id") or blk.get("moment_id")
                 if chosen_cid and f"live_{chosen_cid}" in clip_catalog:
                     chosen_cid = f"live_{chosen_cid}"
 
-                def _rank_candidates(exclude_set):
+                # No Ato 1 (especialmente blocos iniciais de retenção), se ainda houver clipes live_* disponíveis,
+                # PROÍBE usar clipes do acervo estático (garante abertura 100% inédita e aprovada pelo Agente 5!)
+                unused_live = live_cids - used_cids
+                if a_idx == 0 and unused_live and chosen_cid not in unused_live:
+                    chosen_cid = None
+
+                def _rank_candidates(exclude_set, only_live=False):
                     ranked_local = []
                     for cid, meta in clip_catalog.items():
                         if cid in exclude_set:
+                            continue
+                        prio = int(meta.get("priority", 3))
+                        if only_live and prio != 1:
                             continue
                         sc = _score_text_against_tags(txt, meta.get("tags", []))
                         desc_words = {w.strip(".,!?") for w in meta.get("desc", "").lower().split() if len(w) >= 4}
@@ -111,10 +121,8 @@ class AgenteDiretorCriativo:
                         sc += len(desc_words & txt_words) * 5
                         if meta.get("has_audio"):
                             sc += 4
-                        # Prioridade forte para clipes recém-pesquisados nesta execução (priority == 1)
-                        prio = int(meta.get("priority", 3))
                         if prio == 1:
-                            sc += 18
+                            sc += 25
                         elif prio == 2:
                             sc += 4
                         ranked_local.append((sc, cid))
@@ -122,7 +130,9 @@ class AgenteDiretorCriativo:
                     return ranked_local
 
                 if not (chosen_cid and chosen_cid in clip_catalog and chosen_cid not in used_cids):
-                    ranked = _rank_candidates(used_cids)
+                    ranked = _rank_candidates(used_cids, only_live=bool(a_idx == 0 and unused_live))
+                    if not ranked:
+                        ranked = _rank_candidates(used_cids, only_live=False)
                     if ranked:
                         chosen_cid = ranked[0][1]
                     elif clip_catalog:
