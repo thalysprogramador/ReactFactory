@@ -34,9 +34,7 @@ YTDLP = [
 
 
 def _ensure_cookies_file():
-    """Decodifica YOUTUBE_COOKIES_B64 (secret do GitHub Actions) para liberar downloads/legendas em IPs de nuvem."""
-    if os.path.exists(COOKIES_PATH) and os.path.getsize(COOKIES_PATH) > 100:
-        return COOKIES_PATH
+    """Decodifica YOUTUBE_COOKIES_B64 (sempre regrava cópia limpa para evitar que o yt-dlp corrompa o cookie entre chamadas!)."""
     b64 = (os.environ.get("YOUTUBE_COOKIES_B64") or "").strip()
     if not b64:
         local_ck = os.path.join(os.path.dirname(BASE_DIR), "_render_secrets", "YOUTUBE_COOKIES_B64.txt")
@@ -45,20 +43,26 @@ def _ensure_cookies_file():
     if b64:
         try:
             os.makedirs(os.path.dirname(COOKIES_PATH), exist_ok=True)
-            with open(COOKIES_PATH, "wb") as f:
+            # Usa arquivo por thread/pid ou regrava limpo para o yt-dlp nunca sobrescrever com sessão bloqueada
+            import threading
+            ck_file = f"{COOKIES_PATH}.{threading.get_ident()}.txt"
+            with open(ck_file, "wb") as f:
                 f.write(base64.b64decode(b64))
-            return COOKIES_PATH
-        except Exception:
-            pass
+            return ck_file
+        except Exception as err:
+            print(f"[COOKIES V5] Aviso ao decodificar YOUTUBE_COOKIES_B64: {err}", flush=True)
+    if os.path.exists(COOKIES_PATH) and os.path.getsize(COOKIES_PATH) > 100:
+        return COOKIES_PATH
     return None
 
 
 def _ytdlp_cmd(mode="default"):
     """
-    Constrói comando yt-dlp resiliente para PC residencial e nuvem (com JS runtime Node + EJS solver):
-    - mode="default": yt-dlp padrão + Node EJS (funciona 100% no IP residencial!)
-    - mode="cookies": usa cookies autenticados (sem forçar player_client antigo que quebra formato!) + Node EJS
-    - mode="alt": fallback player_client web/mweb
+    Constrói comando yt-dlp resiliente para PC residencial e nuvem (com JS runtime Node/Deno + EJS + bgutil PO Token):
+    - mode="default": yt-dlp padrão + Node/Deno EJS (funciona 100% no IP residencial e com bgutil-pot na nuvem!)
+    - mode="cookies": usa cópia limpa dos cookies autenticados + Node/Deno EJS
+    - mode="alt": cookies + player_client=mweb,web (com PO token do bgutil-pot na porta 4416)
+    - mode="tv": player_client=tv_embedded,mweb
     """
     cmd = list(YTDLP)
     if mode == "cookies":
@@ -69,7 +73,12 @@ def _ytdlp_cmd(mode="default"):
         ck = _ensure_cookies_file()
         if ck:
             cmd += ["--cookies", ck]
-        cmd += ["--extractor-args", "youtube:player_client=web,mweb"]
+        cmd += ["--extractor-args", "youtube:player_client=mweb,web"]
+    elif mode == "tv":
+        ck = _ensure_cookies_file()
+        if ck:
+            cmd += ["--cookies", ck]
+        cmd += ["--extractor-args", "youtube:player_client=tv_embedded,mweb"]
     return cmd
 
 
@@ -121,14 +130,16 @@ def descobrir_conteudo(n_queries=16, por_query=12, ffmpeg_exe=None):
     queries = random.sample(QUERY_POOL, min(n_queries, len(QUERY_POOL)))
     found = {}
 
+    is_cloud = os.environ.get("GITHUB_ACTIONS") == "true"
+
     def _search(q):
         out = []
         if isinstance(q, tuple):
             url = q[1]
         else:
             # sp=CAI%3D -> ordenar por data de upload (recém-postados)
-            url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(q)}&sp=CAI%253D"
-        r = _run(YTDLP + ["--flat-playlist", "--dump-json", "--playlist-end", str(por_query), url], timeout=45)
+            url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(q)}&sp=CAI%3D"
+        r = _run(_ytdlp_cmd("cookies" if is_cloud else "default") + ["--flat-playlist", "--dump-json", "--playlist-end", str(por_query), url], timeout=45)
         if r and r.stdout:
             for line in r.stdout.splitlines():
                 try:
@@ -138,7 +149,7 @@ def descobrir_conteudo(n_queries=16, por_query=12, ffmpeg_exe=None):
         return (q if isinstance(q, str) else "live"), out
 
     for lq in ["gta 6", "gta 6 ao vivo", "gta vi live", "gta 6 gameplay"]:
-        queries.append(("__live__", f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(lq)}&sp=EgJAAQ%253D%253D"))
+        queries.append(("__live__", f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(lq)}&sp=EgJAAQ%3D%3D"))
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         for q, items in pool.map(_search, queries):
@@ -212,7 +223,8 @@ def baixar_transcricoes(cands, max_videos=14, max_chars=26000):
         for f in glob.glob(base + "*"):
             os.remove(f)
         files = []
-        for mode in ("default", "cookies"):
+        sub_modes = ("cookies", "alt", "default") if os.environ.get("GITHUB_ACTIONS") == "true" else ("default", "cookies")
+        for mode in sub_modes:
             _run(_ytdlp_cmd(mode=mode) + [
                 "--skip-download", "--write-auto-subs", "--write-subs", "--sub-langs", "pt.*,pt,en.*,en",
                 "--sub-format", "vtt", "-o", base, f"https://www.youtube.com/watch?v={c['id']}"
@@ -364,10 +376,11 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
             trimmed_in_raw = False
             last_err = ""
 
-            # No GitHub Actions (nuvem), prioriza cookies autenticados + Node EJS; no PC residencial, default primeiro!
+            # No GitHub Actions (nuvem), usa bgutil PO Token + cookies limpos; no PC residencial, default primeiro!
             if os.environ.get("GITHUB_ACTIONS") == "true":
                 strategies = [
                     ("cookies", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("alt", True, "bv*[height<=720]+ba/b[height<=720]/b"),
                     ("cookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
                     ("default", True, "bv*[height<=720]+ba/b[height<=720]/b"),
                 ]
@@ -378,6 +391,7 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
                     ("default", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
                     ("cookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
                 ]
+            errs = []
             for mode, use_sections, fmt in strategies:
                 if os.path.exists(raw):
                     try:
@@ -398,7 +412,9 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
                     trimmed_in_raw = use_sections
                     break
                 if r_dl and r_dl.stderr:
-                    last_err = r_dl.stderr.strip().splitlines()[-1][:160]
+                    err_line = r_dl.stderr.strip().splitlines()[-1][:140]
+                    errs.append(f"{mode}/{use_sections}:{err_line}")
+                    last_err = " | ".join(errs[-2:])
             if not (os.path.exists(raw) and os.path.getsize(raw) > 50_000):
                 print(f"[PESQUISA V5 DL] Falha em {m['mid']} ({vid}): {last_err}", flush=True)
                 return None
