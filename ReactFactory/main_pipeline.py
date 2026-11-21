@@ -89,13 +89,26 @@ def run_pipeline(do_upload=False):
     try:
         build_short_thumbnail(
             viral_video_path=viral_path,
-            headline_text=script_data.get("headline_top", "TRAVOU A LIVE NO GTA 6!"),
+            headline_text=script_data.get("headline_top", "OLHA ESSE DETALHE!"),
             reaction_video_path=None,
             out_jpg=short_thumb,
         )
     except Exception as terr:
         print(f"[THUMB SHORT] Aviso: {terr}")
         short_thumb = None
+
+    # AGENTE 5 — AUDITORIA VISUAL MULTIMODAL REAL ANTES DO UPLOAD (ASSISTE O SHORT E BLOQUEIA SE REPROVAR!)
+    from producao.agentes import AgenteControleQualidade  # noqa: WPS433
+
+    print("[4.5/5] Agente 5 (Controle de Qualidade) assistindo o Short pronto via Gemini Vision...", flush=True)
+    qc = AgenteControleQualidade.auditar_producao(
+        video_path=final_output,
+        script_data=script_data,
+        formato="short",
+    )
+    print(f"[AGENTE 5 - QC SHORT V7] Aprovado={qc['approved']} | Score={qc['score']}% | Motivos={qc['reasons']}", flush=True)
+    if not qc["approved"]:
+        raise RuntimeError(f"SHORT BLOQUEADO PELO CONTROLE DE QUALIDADE (AGENTE 5): {qc['reasons']}")
 
     yt_video_id = None
     if do_upload:
