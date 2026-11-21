@@ -87,32 +87,30 @@ def _make_doc_subtitle_png(text, highlight_word, out_png):
 
 
 def _make_chapter_card_jpg(act_num, act_title, bg_img_path, out_jpg):
-    """Card cinematográfico estilo GTA Vice City neon abrindo cada Ato."""
+    """Card divisor editorial minimalista (Obsidian + Ouro) usado apenas entre Atos 2-5 (1.1s)."""
     if bg_img_path and os.path.exists(bg_img_path):
         im = Image.open(bg_img_path).convert("RGB")
         iw, ih = im.size
         sc = max(1920 / float(iw), 1080 / float(ih))
         im = im.resize((int(iw * sc), int(ih * sc)), Image.Resampling.LANCZOS)
         x0, y0 = (im.width - 1920) // 2, (im.height - 1080) // 2
-        bg = im.crop((x0, y0, x0 + 1920, y0 + 1080)).filter(ImageFilter.GaussianBlur(18))
+        bg = im.crop((x0, y0, x0 + 1920, y0 + 1080)).filter(ImageFilter.GaussianBlur(12))
     else:
-        bg = Image.new("RGB", (1920, 1080), (14, 10, 24))
+        bg = Image.new("RGB", (1920, 1080), (10, 12, 18))
 
-    overlay = Image.new("RGBA", (1920, 1080), (12, 8, 22, 165))
+    overlay = Image.new("RGBA", (1920, 1080), (8, 10, 16, 185))
     canvas = Image.alpha_composite(bg.convert("RGBA"), overlay)
     draw = ImageDraw.Draw(canvas)
 
-    # Barra gradiente neon rosa/ciano GTA 6
-    draw.rectangle([160, 390, 1760, 400], fill=(255, 70, 180, 255))
-    draw.rectangle([160, 670, 1760, 680], fill=(0, 235, 255, 255))
+    # Linha editorial dourada limpa (zero barras rosa/ciano artificiais)
+    draw.rectangle([760, 396, 1160, 402], fill=(255, 190, 11, 255))
 
-    f_tag = load_font(48)
-    f_title = load_font(86)
-    tag = f"CAPÍTULO {act_num}"
+    f_tag = load_font(34, style="poppins")
+    f_title = load_font(96, style="anton")
+    tag = f"PARTE {act_num}"
     tb = draw.textbbox((0, 0), tag, font=f_tag)
     tw = tb[2] - tb[0]
-    draw.rounded_rectangle([(1920 - tw) // 2 - 28, 310, (1920 + tw) // 2 + 28, 376], radius=14, fill=(255, 70, 180, 245))
-    draw.text(((1920 - tw) // 2, 316), tag, font=f_tag, fill=(255, 255, 255, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
+    draw.text(((1920 - tw) // 2, 338), tag, font=f_tag, fill=(255, 190, 11, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
 
     clean_t = _clean_txt(act_title).upper()
     words = clean_t.split()
@@ -127,12 +125,12 @@ def _make_chapter_card_jpg(act_num, act_title, bg_img_path, out_jpg):
         lines.append(" ".join(cur))
     lines = lines[:2]
 
-    yy = 450 if len(lines) == 2 else 495
+    yy = 440 if len(lines) == 2 else 486
     for ln in lines:
         lb = draw.textbbox((0, 0), ln, font=f_title)
         lw = lb[2] - lb[0]
-        draw.text(((1920 - lw) // 2, yy), ln, font=f_title, fill=(255, 245, 210, 255), stroke_width=6, stroke_fill=(0, 0, 0, 255))
-        yy += 102
+        draw.text(((1920 - lw) // 2, yy), ln, font=f_title, fill=(255, 255, 255, 255), stroke_width=6, stroke_fill=(0, 0, 0, 255))
+        yy += 112
 
     canvas.convert("RGB").save(out_jpg, quality=92)
     return out_jpg
