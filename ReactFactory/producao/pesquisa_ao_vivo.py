@@ -27,7 +27,10 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESEARCH_DIR = os.path.join(BASE_DIR, "temp_gta6", "pesquisa_v5")
 HISTORY_V5_FILE = os.path.join(BASE_DIR, "data", "history_v5.json")
 COOKIES_PATH = os.path.join(BASE_DIR, "temp_gta6", "yt_cookies_v5.txt")
-YTDLP = [sys.executable, "-m", "yt_dlp", "--no-warnings", "--quiet"]
+YTDLP = [
+    sys.executable, "-m", "yt_dlp", "--no-warnings", "--quiet",
+    "--js-runtimes", "node,deno", "--remote-components", "ejs:github",
+]
 
 
 def _ensure_cookies_file():
@@ -50,15 +53,23 @@ def _ensure_cookies_file():
     return None
 
 
-def _ytdlp_cmd(with_cookies=True):
+def _ytdlp_cmd(mode="default"):
+    """
+    Constrói comando yt-dlp resiliente para PC residencial e nuvem (com JS runtime Node + EJS solver):
+    - mode="default": yt-dlp padrão + Node EJS (funciona 100% no IP residencial!)
+    - mode="cookies": usa cookies autenticados (sem forçar player_client antigo que quebra formato!) + Node EJS
+    - mode="alt": fallback player_client web/mweb
+    """
     cmd = list(YTDLP)
-    ck = _ensure_cookies_file() if with_cookies else None
-    if ck:
-        # Clientes compatíveis com cookies autenticados
-        cmd += ["--cookies", ck, "--extractor-args", "youtube:player_client=web,mweb"]
-    else:
-        # Clientes sem cookies
-        cmd += ["--extractor-args", "youtube:player_client=tv,android_vr,ios"]
+    if mode == "cookies":
+        ck = _ensure_cookies_file()
+        if ck:
+            cmd += ["--cookies", ck]
+    elif mode == "alt":
+        ck = _ensure_cookies_file()
+        if ck:
+            cmd += ["--cookies", ck]
+        cmd += ["--extractor-args", "youtube:player_client=web,mweb"]
     return cmd
 
 
@@ -200,8 +211,9 @@ def baixar_transcricoes(cands, max_videos=14, max_chars=26000):
         base = os.path.join(RESEARCH_DIR, f"sub_{c['id']}")
         for f in glob.glob(base + "*"):
             os.remove(f)
-        for use_ck in (True, False):
-            _run(_ytdlp_cmd(with_cookies=use_ck) + [
+        files = []
+        for mode in ("default", "cookies"):
+            _run(_ytdlp_cmd(mode=mode) + [
                 "--skip-download", "--write-auto-subs", "--write-subs", "--sub-langs", "pt.*,pt,en.*,en",
                 "--sub-format", "vtt", "-o", base, f"https://www.youtube.com/watch?v={c['id']}"
             ], timeout=45)
@@ -247,8 +259,12 @@ def capturar_lives(cands, ffmpeg_exe, max_lives=3, secs=40):
     lives = [c for c in cands if c["live"]][:max_lives]
     caps = []
     for c in lives:
-        r = _run(_ytdlp_cmd(with_cookies=True) + ["-g", "-f", "best[height<=720]/best", f"https://www.youtube.com/watch?v={c['id']}"], timeout=30)
-        url = (r.stdout.strip().splitlines() or [""])[0] if r and r.stdout else ""
+        url = ""
+        for mode in ("default", "cookies"):
+            r = _run(_ytdlp_cmd(mode=mode) + ["-g", "-f", "best[height<=720]/best", f"https://www.youtube.com/watch?v={c['id']}"], timeout=30)
+            url = (r.stdout.strip().splitlines() or [""])[0] if r and r.stdout else ""
+            if url:
+                break
         if not url:
             continue
         dst = os.path.join(RESEARCH_DIR, f"live_{c['id']}.mp4")
@@ -297,28 +313,30 @@ mecânicas novas, cenas engraçadas/loucas de física, NPCs, polícia, celular, 
 Use as falas do streamer só como pista do que está aparecendo na tela naquele instante.
 
 REGRAS:
-- Cada momento: janela de 10 a 20 segundos onde a coisa ACONTECE na tela (start/end em segundos absolutos do vídeo).
-- Evite momentos de menu, carregamento, conversa com chat, propaganda, ou só webcam.
+- Cada momento: janela de 18 a 24 segundos onde a ação ACONTECE na tela (start/end em segundos absolutos do vídeo) para cobrir o bloco inteiro para frente sem cortar nem reverter!
+- PROIBIDO escolher momentos de trailer oficial, tela de logo do GTA VI, tela de pré-venda, menu, carregamento, conversa com chat, propaganda ou só webcam.
 - Varie canais (no máximo 2 momentos do mesmo vídeo) e varie assuntos.
-- Selecione 12 momentos candidatos (vou validar visualmente e descartar alguns).
-- Depois proponha 1 pauta de VÍDEO LONGO e 1 pauta de SHORT (formato de retenção: lista "Top N", ou "olha o que acharam no GTA 6", ou descoberta específica tipo "funções do celular").
+- Selecione 18 momentos candidatos (vou validar visualmente quadro a quadro e descartar os fracos).
+- Depois proponha 1 pauta de VÍDEO LONGO e 1 pauta de SHORT (formato de alta retenção: "Top N", "coisas escondidas", "bugs insanos" ou descoberta específica de gameplay).
 
 {chr(10).join(blocos)}
 
-Responda APENAS JSON:
+Responda APENAS um objeto JSON (não lista):
 {{
- "momentos": [{{"mid": "m1", "video_id": "...", "canal": "...", "start": 0, "end": 15, "assunto": "bug|segredo|detalhe|mecanica|engracado|mapa", "o_que_acontece": "descrição objetiva do que aparece no jogo", "potencial": 1-10}}],
+ "momentos": [{{"mid": "m1", "video_id": "...", "canal": "...", "start": 0, "end": 22, "assunto": "bug|segredo|detalhe|mecanica|engracado|mapa", "o_que_acontece": "descrição objetiva do que aparece no jogo", "potencial": 1-10}}],
  "pauta_longo": {{"tema": "...", "angulo": "...", "mids_sugeridos": ["m1","m2","..."]}},
  "pauta_short": {{"tema": "...", "formato": "top_n|descoberta|lista", "mids_sugeridos": ["..."]}}
 }}"""
     data, model = gemini_text(prompt, json_mode=True, temperature=0.5, parts_extra=parts_extra or None)
+    if isinstance(data, list):
+        data = data[0] if (data and isinstance(data[0], dict)) else {"momentos": data, "pauta_longo": {}, "pauta_short": {}}
     print(f"[DIRETOR DE PAUTA] {len(data.get('momentos', []))} momentos escolhidos via {model} | "
-          f"Longo='{data.get('pauta_longo', {}).get('tema')}' | Short='{data.get('pauta_short', {}).get('tema')}'", flush=True)
+          f"Longo='{(data.get('pauta_longo') or {}).get('tema')}' | Short='{(data.get('pauta_short') or {}).get('tema')}'", flush=True)
     return data
 
 
 def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
-    """Baixa cada momento COM ÁUDIO ORIGINAL (720p) e valida visualmente com Gemini."""
+    """Baixa cada momento (18-24s contínuos PARA FRENTE) COM ÁUDIO ORIGINAL (720p) e valida visualmente com Gemini."""
     clips_dir = os.path.join(RESEARCH_DIR, "clips")
     os.makedirs(clips_dir, exist_ok=True)
 
@@ -328,43 +346,73 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
         dst = os.path.join(clips_dir, f"{m['mid']}_{vid}.mp4")
         if cand.get("capture"):
             src = cand["capture"]
-            s, e = max(0, float(m.get("start", 0))), min(40, float(m.get("end", 40)))
-            subprocess.run([ffmpeg_exe, "-y", "-ss", f"{s:.2f}", "-i", src, "-t", f"{max(6, e - s):.2f}",
-                            "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1",
+            s = max(0.0, float(m.get("start", 0)))
+            e = min(40.0, max(s + 18.0, float(m.get("end", s + 22))))
+            subprocess.run([ffmpeg_exe, "-y", "-ss", f"{s:.2f}", "-i", src, "-t", f"{max(10.0, e - s):.2f}",
+                            "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1",
                             "-c:v", "libx264", "-preset", "fast", "-crf", "19", "-c:a", "aac", "-ar", "48000", "-ac", "2", dst],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
-            s = max(0, float(m.get("start", 0)) - pad)
-            e = float(m.get("end", s + 15)) + pad
-            e = min(e, s + 24)
+            s = max(0.0, float(m.get("start", 0)) - pad)
+            e = float(m.get("end", s + 20)) + pad
+            # Garante janelas longas (18s a 24s) para o clipe rodar 100% PARA FRENTE durante o bloco inteiro!
+            if e - s < 18.0:
+                e = s + 20.0
+            e = min(e, s + 24.0)
+            dur_req = max(12.0, e - s)
             raw = dst + ".raw.mp4"
+            trimmed_in_raw = False
             last_err = ""
-            for use_ck, fmt in (
-                (True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
-                (False, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/b[height<=720]/b"),
-                (False, "b[height<=720]/b"),
-            ):
+
+            # No GitHub Actions (nuvem), prioriza cookies autenticados + Node EJS; no PC residencial, default primeiro!
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                strategies = [
+                    ("cookies", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("cookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
+                    ("default", True, "bv*[height<=720]+ba/b[height<=720]/b"),
+                ]
+            else:
+                strategies = [
+                    ("default", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("cookies", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("default", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
+                    ("cookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
+                ]
+            for mode, use_sections, fmt in strategies:
                 if os.path.exists(raw):
                     try:
                         os.remove(raw)
                     except OSError:
                         pass
-                r_dl = _run(_ytdlp_cmd(with_cookies=use_ck) + [
+                cmd = _ytdlp_cmd(mode=mode) + [
                     "--ffmpeg-location", ffmpeg_exe, "-f", fmt,
-                    "--download-sections", f"*{s:.0f}-{e:.0f}", "--force-keyframes-at-cuts",
-                    "--merge-output-format", "mp4", "-o", raw, f"https://www.youtube.com/watch?v={vid}"
-                ], timeout=100)
+                    "--merge-output-format", "mp4", "-o", raw,
+                ]
+                if use_sections:
+                    cmd += ["--download-sections", f"*{s:.0f}-{e:.0f}", "--force-keyframes-at-cuts"]
+                else:
+                    cmd += ["--max-filesize", "65M"]
+                cmd.append(f"https://www.youtube.com/watch?v={vid}")
+                r_dl = _run(cmd, timeout=110)
                 if os.path.exists(raw) and os.path.getsize(raw) > 50_000:
+                    trimmed_in_raw = use_sections
                     break
                 if r_dl and r_dl.stderr:
                     last_err = r_dl.stderr.strip().splitlines()[-1][:160]
             if not (os.path.exists(raw) and os.path.getsize(raw) > 50_000):
                 print(f"[PESQUISA V5 DL] Falha em {m['mid']} ({vid}): {last_err}", flush=True)
                 return None
-            subprocess.run([ffmpeg_exe, "-y", "-i", raw,
-                            "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1",
-                            "-c:v", "libx264", "-preset", "fast", "-crf", "19", "-c:a", "aac", "-ar", "48000", "-ac", "2", dst],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            ff_cmd = [ffmpeg_exe, "-y"]
+            if not trimmed_in_raw:
+                ff_cmd += ["-ss", f"{s:.2f}", "-i", raw, "-t", f"{dur_req:.2f}"]
+            else:
+                ff_cmd += ["-i", raw, "-t", f"{dur_req:.2f}"]
+            ff_cmd += [
+                "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "19", "-c:a", "aac", "-ar", "48000", "-ac", "2", dst,
+            ]
+            subprocess.run(ff_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:
                 os.remove(raw)
             except OSError:
@@ -383,20 +431,26 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
         frames = _frames_b64(m["clip"], n=4)
         parts = [{"inline_data": {"mime_type": "image/jpeg", "data": b}} for b in frames]
         prompt = (f"Estas são 4 imagens em ordem de um trecho de vídeo de GTA 6. Descrição esperada: '{m['o_que_acontece']}'.\n"
-                  "Responda JSON: {\"e_gameplay\": true/false (a tela mostra principalmente o JOGO, não só webcam/menu/tela preta), "
+                  "Responda APENAS um objeto JSON: {\"e_gameplay\": true/false (true SOMENTE se mostra gameplay real do jogo, false se for só webcam/menu/tela preta/estática), "
+                  "\"tem_logo_ou_trailer\": true/false (true se aparecer logo gigante 'Grand Theft Auto VI', tela de pré-venda, contagem regressiva ou cartela oficial de trailer), "
+                  "\"tem_overlay_poluido\": true/false (true APENAS se houver QR code grande, banner de patrocinador cobrindo a tela, ou apresentador em tela cheia falando sem gameplay; uma facecam pequena no canto durante gameplay real NÃO é poluído), "
                   "\"bate_com_descricao\": true/false, \"descricao_real\": \"o que realmente aparece no jogo, objetivo, 1 frase\", "
                   "\"nota_visual\": 1-10 (impacto/curiosidade da cena), \"frase_thumb\": \"2 a 4 palavras de impacto sobre a cena\", "
                   "\"regiao\": \"vice_city|leonida_keys|grassrivers|port_gellhorn|ambrosia|mount_kalaga|nenhuma\"}")
         try:
             v, _ = gemini_text(prompt, json_mode=True, temperature=0.2, parts_extra=parts)
+            if isinstance(v, list):
+                v = v[0] if (v and isinstance(v[0], dict)) else {}
         except Exception as err:
             print(f"[VALIDAÇÃO] {m['mid']} erro {err}", flush=True)
             continue
         m.update({"validacao": v, "descricao_real": v.get("descricao_real", m["o_que_acontece"])})
         # Sobrescreve o_que_acontece com o que o Gemini REALMENTE VIU nos frames do clipe (evita narração desalinhada!)
         m["o_que_acontece"] = m["descricao_real"]
-        aprovado = bool(v.get("e_gameplay")) and int(v.get("nota_visual", 0) or 0) >= 6
-        print(f"[VALIDAÇÃO] {m['mid']} ({m['canal']}) gameplay={v.get('e_gameplay')} bate={v.get('bate_com_descricao')} "
+        has_logo = bool(v.get("tem_logo_ou_trailer"))
+        has_clutter = bool(v.get("tem_overlay_poluido"))
+        aprovado = bool(v.get("e_gameplay")) and (not has_logo) and (not has_clutter) and int(v.get("nota_visual", 0) or 0) >= 6
+        print(f"[VALIDAÇÃO] {m['mid']} ({m['canal']}) gameplay={v.get('e_gameplay')} logo={has_logo} clutter={has_clutter} bate={v.get('bate_com_descricao')} "
               f"nota={v.get('nota_visual')} -> {'OK' if aprovado else 'DESCARTADO'} | {m['descricao_real']}", flush=True)
         if aprovado:
             validados.append(m)
