@@ -66,14 +66,13 @@ def _load_video_frames(mp4_path, max_frames=165, size=(1920, 1080)):
 
 
 def _get_clip_frame(frames_list, idx):
+    """Retorna frame estritamente PARA FRENTE (PROIBIDO efeito reverso / ping-pong!)."""
     if not frames_list:
         return None
     n = len(frames_list)
     if n == 1:
         return frames_list[0].copy()
-    cycle = 2 * (n - 1)
-    pos = idx % cycle
-    real_i = pos if pos < n else cycle - pos
+    real_i = min(max(0, int(idx)), n - 1)
     return frames_list[real_i].copy()
 
 
@@ -174,57 +173,11 @@ def _build_top_editorial_bar(badge_type, source_label, act_num, total_acts, act_
 
 def _draw_lower_third_and_hud(frame_bgr, top_hud_strip, headline, subheadline, callout, f_idx, show_lower_third=True):
     """
-    Visual Humanizado V5:
-    - ZERO tarjas/selos artificiais no topo da tela ('CONFIRMADO', 'VERIFICADO', etc. removidos).
-    - Apenas nos primeiros 3.5s de um novo tópico, exibe um Lower-Third discreto e limpo no canto inferior esquerdo.
+    Visual Cinema Limpo V7.1 (pós-auditoria Agente 5):
+    - ZERO tarjas escuras pesadas no canto inferior nem selos artificiais no topo (poluíam a tela junto com as legendas!).
+    - A tela fica 100% limpa na gameplay Full-HD, destacando apenas as legendas Poppins-Black sincronizadas.
     """
-    out = frame_bgr.copy()
-    if not show_lower_third:
-        return out
-
-    # Entrada suave nos primeiros 12 frames e saída suave nos últimos 12 frames da janela de 86 frames (~3.5s)
-    if f_idx < 12:
-        p = f_idx / 12.0
-    elif f_idx > 74:
-        p = max(0.0, (86 - f_idx) / 12.0)
-    else:
-        p = 1.0
-    ease = 1.0 - (1.0 - p) ** 3
-    x_off = int(-480 * (1.0 - ease))
-    alpha_mul = max(0.0, min(1.0, ease))
-
-    img_pil = Image.fromarray(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(img_pil, "RGBA")
-    f_tag = load_font(17, style="poppins")
-    f_head = load_font(44, style="anton")
-    f_sub = load_font(19, style="poppins")
-
-    bx0 = 48 + x_off
-    by0 = 758
-    bw = 740
-    bh = 132
-
-    bg_a = int(214 * alpha_mul)
-    bd_a = int(42 * alpha_mul)
-    ac_a = int(255 * alpha_mul)
-    tx_a = int(250 * alpha_mul)
-    sb_a = int(205 * alpha_mul)
-
-    draw.rounded_rectangle(
-        [bx0, by0, bx0 + bw, by0 + bh],
-        radius=12,
-        fill=(8, 11, 18, bg_a),
-        outline=(255, 255, 255, bd_a),
-        width=1,
-    )
-    draw.rounded_rectangle([bx0, by0 + 12, bx0 + 5, by0 + bh - 12], radius=2, fill=(255, 190, 11, ac_a))
-
-    tag_str = _clean_ascii(callout or "GTA VI").upper()
-    draw.text((bx0 + 24, by0 + 12), tag_str[:50], font=f_tag, fill=(255, 190, 11, ac_a))
-    draw.text((bx0 + 24, by0 + 36), _clean_ascii(headline).upper()[:42], font=f_head, fill=(248, 250, 252, tx_a))
-    draw.text((bx0 + 24, by0 + 92), _clean_ascii(subheadline)[:68], font=f_sub, fill=(148, 163, 184, sb_a))
-
-    return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+    return frame_bgr
 
 
 def _draw_word_caption_pil(frame_bgr, words, t_sec):
@@ -318,39 +271,65 @@ def _render_block_video(job, fallback_clips, sfx_pack, work_dir):
         job["act_title"],
     )
 
-    # Sincronização 1-para-1 (V5.1):
-    # Quando o bloco tem 1 clipe específico sincronizado à narração (`sync_lock=True` ou len==1),
-    # reproduz ESSE MESMO CLIPE do início ao fim do bloco (sem pular para cenas aleatórias que não batem com a fala!).
+    # Sincronização 1-para-1 ESTRITAMENTE PARA FRENTE (V7 — ZERO EFEITO REVERSO / ZERO PING-PONG!):
+    # - O bloco usa seu clipe principal sincronizado (`sem_vids[0]`) rodando 100% PARA FRENTE.
+    # - Se o clipe principal for mais curto que a duração da narração do bloco, fazemos cross-dissolve
+    #   limpo PARA FRENTE para uma 2ª cena relacionada (`sem_vids[1]`) e, se necessário, uma 3ª (`sem_vids[2]`).
+    # - NUNCA reverte nem repete o mesmo clipe de trás para frente!
     sem_vids = [v for v in (blk.get("video_clips") or []) if v and os.path.exists(v)]
-    sync_lock = bool(blk.get("sync_lock")) or (len(sem_vids) == 1)
+    sync_lock = bool(blk.get("sync_lock")) or (len(sem_vids) >= 1)
     if not sem_vids and fallback_clips:
         sem_vids = [fallback_clips[job["global_idx"] % len(fallback_clips)]]
         sync_lock = True
 
-    if sync_lock:
-        frames_v0 = _load_video_frames(sem_vids[0], max_frames=max(total_frames + 24, 360))
+    # Garante clipes de continuação PARA FRENTE distintos caso o clipe principal acabe antes da fala
+    backup_pool = [c for c in (fallback_clips or []) if c and os.path.exists(c) and c not in sem_vids]
+    while len(sem_vids) < 3 and backup_pool:
+        pick = backup_pool[(job["global_idx"] + len(sem_vids)) % len(backup_pool)]
+        sem_vids.append(pick)
+        backup_pool = [c for c in backup_pool if c != pick]
+
+    frames_v0 = _load_video_frames(sem_vids[0], max_frames=max(total_frames + 24, 520))
+    frames_v1 = _load_video_frames(sem_vids[1], max_frames=max(total_frames + 24, 420)) if len(sem_vids) > 1 else []
+    frames_v2 = _load_video_frames(sem_vids[2], max_frames=max(total_frames + 24, 420)) if len(sem_vids) > 2 else []
+    if not frames_v1:
         frames_v1 = frames_v0
-        frames_v2 = frames_v0
-    else:
-        while len(sem_vids) < 3 and fallback_clips:
-            sem_vids.append(fallback_clips[(job["global_idx"] * 3 + len(sem_vids)) % len(fallback_clips)])
-        frames_v0 = _load_video_frames(sem_vids[0], max_frames=200)
-        frames_v1 = _load_video_frames(sem_vids[1], max_frames=200) or frames_v0
-        frames_v2 = _load_video_frames(sem_vids[2], max_frames=200) or frames_v1
+    if not frames_v2:
+        frames_v2 = frames_v1
 
     remotion_frames = []
     if is_remotion_scene and job.get("remotion_mp4") and os.path.exists(job["remotion_mp4"]):
-        remotion_frames = _load_video_frames(job["remotion_mp4"], max_frames=160)
+        remotion_frames = _load_video_frames(job["remotion_mp4"], max_frames=180)
 
-    if sync_lock and not remotion_frames:
-        f1_end = total_frames
-        f2_end = total_frames
-    elif sync_lock and remotion_frames:
-        f1_end = int(total_frames * 0.40)
-        f2_end = total_frames
+    if remotion_frames:
+        # Sub-cena 1: Remotion (até o fim real do Remotion ou 42% do bloco) -> depois gameplay v0 -> v1 (sempre PARA FRENTE!)
+        f1_end = min(len(remotion_frames), int(total_frames * 0.42))
+        rem_after_rem = total_frames - f1_end
+        if len(frames_v0) >= rem_after_rem:
+            # v1 recebe frames_v0 (gameplay principal do bloco) e cobre até o fim para frente
+            frames_v2 = frames_v1
+            frames_v1 = frames_v0
+            f2_end = total_frames
+        else:
+            # Remotion -> frames_v0 (inteiro para frente) -> frames_v1 (continuação para frente)
+            frames_v2 = frames_v1
+            frames_v1 = frames_v0
+            f2_end = min(total_frames, f1_end + max(24, len(frames_v1) - 2))
+    elif sync_lock:
+        # Bloco de gameplay puro: roda frames_v0 100% PARA FRENTE; se acabar antes da fala, corta limpo para frames_v1 e frames_v2!
+        if len(frames_v0) >= total_frames:
+            f1_end = total_frames
+            f2_end = total_frames
+        else:
+            f1_end = max(24, min(total_frames - 12, len(frames_v0) - 2))
+            rem_after_v0 = total_frames - f1_end
+            if len(frames_v1) >= rem_after_v0:
+                f2_end = total_frames
+            else:
+                f2_end = max(f1_end + 24, min(total_frames - 12, f1_end + len(frames_v1) - 2))
     else:
-        f1_end = int(total_frames * (0.45 if remotion_frames else 0.34))
-        f2_end = int(total_frames * (0.73 if remotion_frames else 0.67))
+        f1_end = min(len(frames_v0) - 2 if len(frames_v0) > 26 else total_frames, int(total_frames * 0.34))
+        f2_end = min(f1_end + max(24, len(frames_v1) - 2), int(total_frames * 0.67))
     trans_len = 10
 
     headline = blk.get("headline") or blk.get("callout") or "DOSSIE GTA VI"
@@ -361,7 +340,7 @@ def _render_block_video(job, fallback_clips, sfx_pack, work_dir):
     proc = subprocess.Popen(
         [
             FFMPEG_EXE, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", "1920x1080", "-r", str(fps), "-i", "pipe:0",
-            "-c:v", "libx264", "-preset", "superfast", "-crf", "19", "-pix_fmt", "yuv420p",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "19", "-pix_fmt", "yuv420p",
             "-video_track_timescale", "24000", "-an", silent_mp4,
         ],
         stdin=subprocess.PIPE,
@@ -636,29 +615,35 @@ def compose_studio_video(script_data, wav_map, words_map, work_dir, output_mp4, 
         mm, ss = divmod(int(total_t), 60)
         chapters_ts.append(f"{mm}:{ss:02d} {act_title}")
 
-        first_img = (act.get("blocks") or [{}])[0].get("primary_img")
-        card_jpg = os.path.join(work_dir, f"act_{act_num}_card.jpg")
-        _make_chapter_card_jpg(act_num, act_title, first_img, card_jpg)
-        card_vis = os.path.join(work_dir, f"card_act{act_num:02d}_vis.mp4")
-        _render_kenburns_cv2(card_jpg, 2.20, card_vis, zoom_in=True, fps=24)
-        card_mp4 = os.path.join(work_dir, f"seg_act{act_num:02d}_00_card.mp4")
-        subprocess.run(
-            [
-                FFMPEG_EXE, "-y", "-i", card_vis,
-                "-i", sfx_pack["sub_drop"], "-stream_loop", "-1", "-i", bgm_file,
-                "-filter_complex",
-                "[1:a]volume=0.65[s];[2:a]atrim=0:2.20,volume=0.90[b];[s][b]amix=inputs=2:duration=longest:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[a]",
-                "-map", "0:v", "-map", "[a]", "-t", "2.20",
-                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
-                "-video_track_timescale", "24000", card_mp4,
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        ordered_segments.append(card_mp4)
-        total_t += 2.20
-        bgm_offset = 2.20
+        # RETENÇÃO ELITE V7:
+        # - Ato 1 (a_idx == 0) NUNCA tem cartela borrada de capítulo! Começa em 0:00 direto na gameplay de alto impacto + gancho!
+        # - Atos 2-5 usam divisor editorial rápido (1.10s) apenas para respirar entre capítulos.
+        if a_idx > 0:
+            first_img = (act.get("blocks") or [{}])[0].get("primary_img")
+            card_jpg = os.path.join(work_dir, f"act_{act_num}_card.jpg")
+            _make_chapter_card_jpg(act_num, act_title, first_img, card_jpg)
+            card_vis = os.path.join(work_dir, f"card_act{act_num:02d}_vis.mp4")
+            _render_kenburns_cv2(card_jpg, 1.10, card_vis, zoom_in=True, fps=24)
+            card_mp4 = os.path.join(work_dir, f"seg_act{act_num:02d}_00_card.mp4")
+            subprocess.run(
+                [
+                    FFMPEG_EXE, "-y", "-i", card_vis,
+                    "-i", sfx_pack["sub_drop"], "-stream_loop", "-1", "-i", bgm_file,
+                    "-filter_complex",
+                    "[1:a]volume=0.55[s];[2:a]atrim=0:1.10,volume=0.75[b];[s][b]amix=inputs=2:duration=longest:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[a]",
+                    "-map", "0:v", "-map", "[a]", "-t", "1.10",
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                    "-video_track_timescale", "24000", card_mp4,
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            ordered_segments.append(card_mp4)
+            total_t += 1.10
+            bgm_offset = 1.10
+        else:
+            bgm_offset = 0.0
 
         for b_idx, blk in enumerate(act.get("blocks", [])):
             bid = f"a{act_num}_b{b_idx}"
@@ -727,7 +712,7 @@ def compose_studio_video(script_data, wav_map, words_map, work_dir, output_mp4, 
         job["remotion_mp4"] = rem_mp4
 
     done = 0
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         futs = [pool.submit(_render_block_video, j, trailer_clips, sfx_pack, work_dir) for j in block_jobs]
         for fut in as_completed(futs):
             fut.result()
