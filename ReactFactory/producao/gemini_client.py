@@ -14,7 +14,7 @@ import urllib.request
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 
-TEXT_MODELS = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash"]
+TEXT_MODELS = ["gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3.5-flash", "gemini-3.8-flash"]
 TTS_MODELS = ["gemini-2.5-flash-preview-tts", "gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview"]
 RETRYABLE = (429, 500, 502, 503, 504)
 
@@ -76,5 +76,13 @@ def gemini_text(prompt, models=None, json_mode=False, temperature=0.7, parts_ext
     if json_mode:
         cfg["responseMimeType"] = "application/json"
     data = gemini_generate({"contents": [{"parts": parts}], "generationConfig": cfg}, models=models)
-    txt = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
-    return (json.loads(txt) if json_mode else txt), data["_model"]
+    txt = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"]).strip()
+    if json_mode:
+        if txt.startswith("```"):
+            txt = txt.strip("`").lstrip("json").strip()
+        parsed = json.loads(txt)
+        # Alguns modelos fallback (ex: gemini-2.5-flash) retornam [{...}] em vez de {...}
+        if isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
+            parsed = parsed[0]
+        return parsed, data["_model"]
+    return txt, data["_model"]
