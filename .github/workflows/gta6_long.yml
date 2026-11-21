@@ -33,11 +33,16 @@ jobs:
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
           cd ReactFactory/studio && npm install --no-audit --no-fund
 
+      - name: Start YouTube PO Token Server (bgutil Docker)
+        run: |
+          docker run -d --name bgutil-pot -p 4416:4416 --init brainicism/bgutil-ytdlp-pot-provider || true
+          sleep 3
+
       - name: Install Python Dependencies
         run: |
           pip install --upgrade pip
           pip install -r ReactFactory/requirements.txt
-          pip install -U "yt-dlp[default]"
+          pip install -U "yt-dlp[default]" bgutil-ytdlp-pot-provider
 
       - name: Run GTA 6 Storytelling Long Pipeline
         env:
