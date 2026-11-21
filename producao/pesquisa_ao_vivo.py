@@ -29,7 +29,7 @@ HISTORY_V5_FILE = os.path.join(BASE_DIR, "data", "history_v5.json")
 COOKIES_PATH = os.path.join(BASE_DIR, "temp_gta6", "yt_cookies_v5.txt")
 YTDLP = [
     sys.executable, "-m", "yt_dlp", "--no-warnings", "--quiet",
-    "--js-runtimes", "node", "--remote-components", "ejs:github",
+    "--js-runtimes", "node,deno", "--remote-components", "ejs:github",
 ]
 
 
