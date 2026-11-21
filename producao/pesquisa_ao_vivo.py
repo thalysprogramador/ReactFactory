@@ -27,7 +27,10 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESEARCH_DIR = os.path.join(BASE_DIR, "temp_gta6", "pesquisa_v5")
 HISTORY_V5_FILE = os.path.join(BASE_DIR, "data", "history_v5.json")
 COOKIES_PATH = os.path.join(BASE_DIR, "temp_gta6", "yt_cookies_v5.txt")
-YTDLP = [sys.executable, "-m", "yt_dlp", "--no-warnings", "--quiet"]
+YTDLP = [
+    sys.executable, "-m", "yt_dlp", "--no-warnings", "--quiet",
+    "--js-runtimes", "node", "--remote-components", "ejs:github",
+]
 
 
 def _ensure_cookies_file():
@@ -52,17 +55,20 @@ def _ensure_cookies_file():
 
 def _ytdlp_cmd(mode="default"):
     """
-    Constrói comando yt-dlp resiliente para PC residencial e nuvem:
-    - mode="default": yt-dlp padrão (sem player_client forçado e sem cookies expirados -> funciona 100% no IP residencial!)
-    - mode="cookies": usa cookies autenticados + web/mweb (para IPs de nuvem como GitHub Actions)
-    - mode="alt": fallback player_client alternativo
+    Constrói comando yt-dlp resiliente para PC residencial e nuvem (com JS runtime Node + EJS solver):
+    - mode="default": yt-dlp padrão + Node EJS (funciona 100% no IP residencial!)
+    - mode="cookies": usa cookies autenticados (sem forçar player_client antigo que quebra formato!) + Node EJS
+    - mode="alt": fallback player_client web/mweb
     """
     cmd = list(YTDLP)
     if mode == "cookies":
         ck = _ensure_cookies_file()
         if ck:
-            cmd += ["--cookies", ck, "--extractor-args", "youtube:player_client=web,mweb"]
+            cmd += ["--cookies", ck]
     elif mode == "alt":
+        ck = _ensure_cookies_file()
+        if ck:
+            cmd += ["--cookies", ck]
         cmd += ["--extractor-args", "youtube:player_client=web,mweb"]
     return cmd
 
@@ -358,15 +364,20 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
             trimmed_in_raw = False
             last_err = ""
 
-            # Tentativa 1: yt-dlp padrão (sem player_client forçado e sem cookies expirados -> funciona 100% no IP residencial!)
-            # Tentativa 2: yt-dlp padrão baixando arquivo completo (<=65MB) e cortando localmente no FFmpeg (imune a erro HTTP 403 em seek!)
-            # Tentativa 3: yt-dlp com cookies web/mweb (fallback para IPs de nuvem / GitHub Actions)
-            strategies = [
-                ("default", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/b[height<=720]/b"),
-                ("default", True, "b[height<=720]/b"),
-                ("default", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
-                ("cookies", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/b[height<=720]/b"),
-            ]
+            # No GitHub Actions (nuvem), prioriza cookies autenticados + Node EJS; no PC residencial, default primeiro!
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                strategies = [
+                    ("cookies", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("cookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
+                    ("default", True, "bv*[height<=720]+ba/b[height<=720]/b"),
+                ]
+            else:
+                strategies = [
+                    ("default", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("cookies", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("default", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
+                    ("cookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
+                ]
             for mode, use_sections, fmt in strategies:
                 if os.path.exists(raw):
                     try:
