@@ -59,26 +59,34 @@ def _ensure_cookies_file():
 def _ytdlp_cmd(mode="default"):
     """
     Constrói comando yt-dlp resiliente para PC residencial e nuvem (com JS runtime Node/Deno + EJS + bgutil PO Token):
-    - mode="default": yt-dlp padrão + Node/Deno EJS (funciona 100% no IP residencial e com bgutil-pot na nuvem!)
-    - mode="cookies": usa cópia limpa dos cookies autenticados + Node/Deno EJS
-    - mode="alt": cookies + player_client=mweb,web (com PO token do bgutil-pot na porta 4416)
-    - mode="tv": player_client=tv_embedded,mweb
+    - mode="default": yt-dlp padrão + Node/Deno EJS (funciona 100% no IP residencial!)
+    - mode="pot_nocookies": sem cookies + PO Token via bgutil-pot (http://127.0.0.1:4416) -> imune a rate-limit de conta!
+    - mode="cookies": usa cópia limpa dos cookies autenticados + PO Token bgutil-pot
+    - mode="alt": cookies + player_client=mweb,web + PO Token bgutil-pot
+    - mode="tv": player_client=tv_embedded,mweb (sem cookies)
     """
     cmd = list(YTDLP)
-    if mode == "cookies":
+    is_cloud = os.environ.get("GITHUB_ACTIONS") == "true"
+    pot_arg = ";youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416" if is_cloud else ""
+
+    if mode == "default":
+        if is_cloud:
+            cmd += ["--extractor-args", f"youtube:player_client=mweb,web{pot_arg}"]
+    elif mode == "pot_nocookies":
+        cmd += ["--extractor-args", f"youtube:player_client=mweb,web,tv_embedded{pot_arg}"]
+    elif mode == "cookies":
         ck = _ensure_cookies_file()
         if ck:
             cmd += ["--cookies", ck]
+        if pot_arg:
+            cmd += ["--extractor-args", f"youtube:player_client=web,mweb{pot_arg}"]
     elif mode == "alt":
         ck = _ensure_cookies_file()
         if ck:
             cmd += ["--cookies", ck]
-        cmd += ["--extractor-args", "youtube:player_client=mweb,web"]
+        cmd += ["--extractor-args", f"youtube:player_client=mweb,web{pot_arg}"]
     elif mode == "tv":
-        ck = _ensure_cookies_file()
-        if ck:
-            cmd += ["--cookies", ck]
-        cmd += ["--extractor-args", "youtube:player_client=tv_embedded,mweb"]
+        cmd += ["--extractor-args", f"youtube:player_client=tv_embedded,mweb{pot_arg}"]
     return cmd
 
 
@@ -130,8 +138,6 @@ def descobrir_conteudo(n_queries=16, por_query=12, ffmpeg_exe=None):
     queries = random.sample(QUERY_POOL, min(n_queries, len(QUERY_POOL)))
     found = {}
 
-    is_cloud = os.environ.get("GITHUB_ACTIONS") == "true"
-
     def _search(q):
         out = []
         if isinstance(q, tuple):
@@ -139,7 +145,8 @@ def descobrir_conteudo(n_queries=16, por_query=12, ffmpeg_exe=None):
         else:
             # sp=CAI%3D -> ordenar por data de upload (recém-postados)
             url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(q)}&sp=CAI%3D"
-        r = _run(_ytdlp_cmd("cookies" if is_cloud else "default") + ["--flat-playlist", "--dump-json", "--playlist-end", str(por_query), url], timeout=45)
+        # NUNCA usar cookies nas 20 buscas paralelas (evita que o YouTube dê rate-limit de 1h na sessão do cookie!)
+        r = _run(YTDLP + ["--flat-playlist", "--dump-json", "--playlist-end", str(por_query), url], timeout=45)
         if r and r.stdout:
             for line in r.stdout.splitlines():
                 try:
@@ -223,7 +230,7 @@ def baixar_transcricoes(cands, max_videos=14, max_chars=26000):
         for f in glob.glob(base + "*"):
             os.remove(f)
         files = []
-        sub_modes = ("cookies", "alt", "default") if os.environ.get("GITHUB_ACTIONS") == "true" else ("default", "cookies")
+        sub_modes = ("pot_nocookies", "cookies", "default") if os.environ.get("GITHUB_ACTIONS") == "true" else ("default", "cookies")
         for mode in sub_modes:
             _run(_ytdlp_cmd(mode=mode) + [
                 "--skip-download", "--write-auto-subs", "--write-subs", "--sub-langs", "pt.*,pt,en.*,en",
@@ -376,19 +383,21 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
             trimmed_in_raw = False
             last_err = ""
 
-            # No GitHub Actions (nuvem), usa bgutil PO Token + cookies limpos; no PC residencial, default primeiro!
+            # No GitHub Actions (nuvem), prioriza pot_nocookies (PO Token via bgutil sem gastar rate-limit da conta!)
+            # e inclui download sem --download-sections (corte local no FFmpeg -> evita 'ffmpeg exited with code 8'!).
             if os.environ.get("GITHUB_ACTIONS") == "true":
                 strategies = [
+                    ("pot_nocookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]/b"),
+                    ("pot_nocookies", True, "bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("cookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]/b"),
                     ("cookies", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
-                    ("alt", True, "bv*[height<=720]+ba/b[height<=720]/b"),
-                    ("cookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
-                    ("default", True, "bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("tv", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b"),
                 ]
             else:
                 strategies = [
                     ("default", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
-                    ("cookies", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
                     ("default", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
+                    ("cookies", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
                     ("cookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
                 ]
             errs = []
@@ -439,7 +448,8 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
         m["canal"] = cand.get("channel", m.get("canal", "Criador"))
         return m
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    dl_workers = 2 if os.environ.get("GITHUB_ACTIONS") == "true" else 4
+    with ThreadPoolExecutor(max_workers=dl_workers) as pool:
         baixados = [m for m in pool.map(_dl, momentos) if m]
 
     validados = []
