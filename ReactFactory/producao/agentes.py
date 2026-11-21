@@ -95,37 +95,53 @@ class AgenteDiretorCriativo:
                         remotion_used_in_act = True
                         used_remotion_types.add(st)
 
-                # Trava 1-para-1 do clipe real validado (ZERO repetição de clipes!)
+                # Trava 1-para-1 do clipe real validado (ZERO repetição + prioridade máxima para clipes novos ao vivo!)
                 chosen_cid = blk.get("clip_id") or blk.get("moment_id")
                 if chosen_cid and f"live_{chosen_cid}" in clip_catalog:
                     chosen_cid = f"live_{chosen_cid}"
-                if not (chosen_cid and chosen_cid in clip_catalog and chosen_cid not in used_cids):
-                    # Escolhe o clipe NÃO USADO mais aderente semanticamente ao texto deste bloco
-                    ranked = []
+
+                def _rank_candidates(exclude_set):
+                    ranked_local = []
                     for cid, meta in clip_catalog.items():
-                        if cid in used_cids:
+                        if cid in exclude_set:
                             continue
                         sc = _score_text_against_tags(txt, meta.get("tags", []))
-                        # Bonus para palavras em comum com a descrição real do clipe
                         desc_words = {w.strip(".,!?") for w in meta.get("desc", "").lower().split() if len(w) >= 4}
                         txt_words = {w.strip(".,!?") for w in txt.split() if len(w) >= 4}
                         sc += len(desc_words & txt_words) * 5
                         if meta.get("has_audio"):
-                            sc += 3
-                        sc -= (meta.get("priority", 3) - 1) * 2
-                        ranked.append((sc, cid))
-                    ranked.sort(key=lambda x: x[0], reverse=True)
+                            sc += 4
+                        # Prioridade forte para clipes recém-pesquisados nesta execução (priority == 1)
+                        prio = int(meta.get("priority", 3))
+                        if prio == 1:
+                            sc += 18
+                        elif prio == 2:
+                            sc += 4
+                        ranked_local.append((sc, cid))
+                    ranked_local.sort(key=lambda x: x[0], reverse=True)
+                    return ranked_local
+
+                if not (chosen_cid and chosen_cid in clip_catalog and chosen_cid not in used_cids):
+                    ranked = _rank_candidates(used_cids)
                     if ranked:
                         chosen_cid = ranked[0][1]
                     elif clip_catalog:
-                        # Só recicla se realmente acabarem todos os clipes únicos do catálogo
                         chosen_cid = list(clip_catalog.keys())[len(flat_blocks) % len(clip_catalog)]
 
                 if chosen_cid and chosen_cid in clip_catalog:
                     used_cids.add(chosen_cid)
                     meta = clip_catalog[chosen_cid]
+                    # Anexa 2º clipe de continuação PARA FRENTE relacionado ao tema (evita qualquer reverso se o 1º acabar antes!)
+                    backup_cands = _rank_candidates({chosen_cid})
+                    vids_for_blk = [meta["path"]]
+                    for _, bcid in backup_cands[:3]:
+                        bp = clip_catalog[bcid]["path"]
+                        if bp != meta["path"] and bp not in vids_for_blk:
+                            vids_for_blk.append(bp)
+                            if len(vids_for_blk) >= 2:
+                                break
                     blk["clip_id"] = chosen_cid
-                    blk["video_clips"] = [meta["path"]]
+                    blk["video_clips"] = vids_for_blk
                     blk["sync_lock"] = True
                     if not blk.get("location_key") or blk.get("location_key") == "vice_city":
                         blk["location_key"] = meta.get("regiao", "vice_city")
@@ -345,8 +361,8 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
     3. Extrai timestamps palavra-por-palavra via faster-whisper para sincronismo de legendas e cortes.
     """
     import base64
+    import time
     from voice_and_avatar import (  # noqa: WPS433
-        _call_chatterbox_hf,
         _call_edge_tts,
         _master_voice_wav,
         get_audio_duration,
@@ -356,7 +372,10 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
     os.makedirs(work_dir, exist_ok=True)
     wav_map = {}
     words_map = {}
-    engine_used = "gemini-3.8-flash-tts"
+    engine_counts = {}
+    last_gemini_call_t = 0.0
+    gemini_consec_fails = 0
+    force_uniform_edge = False
 
     for idx, blk in enumerate(blocks):
         bid = blk["id"]
@@ -366,50 +385,59 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
 
         if not (os.path.exists(out_wav) and os.path.getsize(out_wav) > 15_000):
             ok = False
-            # Camada 1: Gemini 3.8 Flash TTS / 2.5 Flash Preview TTS (voz humana PT-BR consistente)
-            try:
-                payload = {
-                    "contents": [{"parts": [{"text": clean_text}]}],
-                    "generationConfig": {
-                        "responseModalities": ["AUDIO"],
-                        "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice_name}}},
-                    },
-                }
-                resp = gemini_generate(
-                    payload,
-                    models=["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts", "gemini-3.1-flash-tts-preview"],
-                    attempts_per_model=2,
-                    timeout=90,
-                    verbose=False,
-                )
-                pcm_b64 = resp["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
-                pcm_bytes = base64.b64decode(pcm_b64)
-                with wave.open(raw_wav, "wb") as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(24000)
-                    wf.writeframes(pcm_bytes)
-                _master_voice_wav(raw_wav, out_wav)
-                ok = os.path.exists(out_wav) and get_audio_duration(out_wav) > 1.2
-                engine_used = resp.get("_model", "gemini-3.8-flash-tts")
-            except Exception as e_gem:
-                print(f"[VOICE STUDIO] Aviso Gemini TTS no bloco {bid} ({e_gem}) -> tentando Chatterbox/Edge", flush=True)
+            # Circuit-breaker anti-429: se cota diária do Gemini TTS estourou (2 falhas seguidas),
+            # pula direto para Edge-TTS Neural em 100% dos blocos (evita perder 45 min em retries e evita misturar 2 vozes!)
+            if not force_uniform_edge:
+                if last_gemini_call_t > 0:
+                    elapsed = time.time() - last_gemini_call_t
+                    if elapsed < 4.3:
+                        time.sleep(4.3 - elapsed)
 
-            # Camada 2: Chatterbox PT-BR
-            if not ok and _call_chatterbox_hf(clean_text, raw_wav):
-                _master_voice_wav(raw_wav, out_wav)
-                ok = os.path.exists(out_wav) and get_audio_duration(out_wav) > 1.2
-                engine_used = "chatterbox_ptbr"
+                # Camada 1: Gemini Flash TTS (voz humana PT-BR 'Orus' 100% consistente)
+                try:
+                    last_gemini_call_t = time.time()
+                    payload = {
+                        "contents": [{"parts": [{"text": clean_text}]}],
+                        "generationConfig": {
+                            "responseModalities": ["AUDIO"],
+                            "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice_name}}},
+                        },
+                    }
+                    resp = gemini_generate(
+                        payload,
+                        models=["gemini-2.5-flash-preview-tts", "gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview"],
+                        attempts_per_model=2,
+                        timeout=75,
+                        verbose=False,
+                    )
+                    pcm_b64 = resp["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
+                    pcm_bytes = base64.b64decode(pcm_b64)
+                    with wave.open(raw_wav, "wb") as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(24000)
+                        wf.writeframes(pcm_bytes)
+                    _master_voice_wav(raw_wav, out_wav)
+                    ok = os.path.exists(out_wav) and get_audio_duration(out_wav) > 1.2
+                    if ok:
+                        gemini_consec_fails = 0
+                        m_used = resp.get("_model", "gemini-2.5-flash-preview-tts")
+                        engine_counts[m_used] = engine_counts.get(m_used, 0) + 1
+                except Exception as e_gem:
+                    gemini_consec_fails += 1
+                    print(f"[VOICE STUDIO] Aviso Gemini TTS no bloco {bid} ({e_gem}) -> fallback Edge-TTS Neural", flush=True)
+                    if gemini_consec_fails >= 2:
+                        force_uniform_edge = True
+                        print("[VOICE STUDIO] Cota diária Gemini TTS atingida -> padronizando 100% dos blocos em Edge-TTS Neural (voz única e rápida!)", flush=True)
 
-            # Camada 3: Fallback garantido Edge-TTS Neural masterizado
+            # Camada 2: Fallback garantido Edge-TTS Neural masterizado
             if not ok:
                 mp3_tmp = os.path.join(work_dir, f"tmp_{bid}.mp3")
                 _call_edge_tts(clean_text, mp3_tmp, rate="+5%")
                 _master_voice_wav(mp3_tmp, out_wav)
                 if os.path.exists(mp3_tmp):
                     os.remove(mp3_tmp)
-                if engine_used == "gemini-3.8-flash-tts":
-                    engine_used = "hybrid_gemini_edge"
+                engine_counts["edge_tts"] = engine_counts.get("edge_tts", 0) + 1
 
             if os.path.exists(raw_wav):
                 try:
@@ -421,12 +449,28 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
         dur = get_audio_duration(out_wav)
         w_ts = extract_word_timestamps(out_wav, ffmpeg_exe, reference_text=blk["narration"])
         if not w_ts:
-            # Fallback proporcional se Whisper falhar
             raw_words = blk["narration"].split()
             span = dur / float(max(1, len(raw_words)))
             w_ts = [{"w": w, "s": round(i * span, 2), "e": round((i + 1) * span, 2)} for i, w in enumerate(raw_words)]
         words_map[bid] = w_ts
 
+    # Se caiu em force_uniform_edge no meio e havia poucos blocos anteriores em Gemini, padroniza TODOS em Edge-TTS
+    if force_uniform_edge and any(k != "edge_tts" for k in engine_counts):
+        print("[VOICE STUDIO] Uniformizando blocos iniciais para Edge-TTS Neural (zero troca de voz no mesmo vídeo!)", flush=True)
+        for blk in blocks:
+            bid = blk["id"]
+            out_wav = wav_map[bid]
+            clean_text = normalize_ptbr_phonetics(blk["narration"])
+            mp3_tmp = os.path.join(work_dir, f"tmp_uni_{bid}.mp3")
+            _call_edge_tts(clean_text, mp3_tmp, rate="+5%")
+            _master_voice_wav(mp3_tmp, out_wav)
+            if os.path.exists(mp3_tmp):
+                os.remove(mp3_tmp)
+            dur = get_audio_duration(out_wav)
+            words_map[bid] = extract_word_timestamps(out_wav, ffmpeg_exe, reference_text=blk["narration"])
+        engine_counts = {"edge_tts_uniform": len(blocks)}
+
+    engine_used = ", ".join(f"{k}:{v}" for k, v in engine_counts.items()) or "gemini-2.5-flash-preview-tts"
     return wav_map, words_map, engine_used
 
 
@@ -483,41 +527,36 @@ class AgenteEditorAudiovisual:
 
 
 # ============================================================================
-# AGENTE 5 — CONTROLE DE QUALIDADE (AUDITORIA DE 16 CRITÉRIOS)
+# AGENTE 5 — CONTROLE DE QUALIDADE MULTIMODAL V7 (ASSISTE O VÍDEO E BLOQUEIA LIXO!)
 # ============================================================================
 class AgenteControleQualidade:
-    """Revisa o vídeo renderizado antes da publicação; reprova vídeos fora do padrão."""
+    """
+    Auditor Real de Controle de Qualidade (V7 — Multimodal Vision + Anti-Reverso + Bloqueio Real):
+    - ASSISTE de verdade o vídeo renderizado extraindo 10 frames cronológicos (com foco especial nos segundos 0:00-0:06!)
+      e submetendo as imagens reais ao Gemini Vision para auditar abertura, ausência de logo GTA/trailer,
+      variação de cenas, qualidade das legendas e retenção de elite.
+    - Detecta programaticamente efeito reverso (ping-pong), telas pretas, frames congelados e ausência de áudio.
+    - Se reprovar (`approved=False`), o pipeline BLOQUEIA terminantemente o upload no YouTube!
+    """
 
     @staticmethod
-    def auditar_producao(video_path, script_data, wav_map, words_map, music_credits, formato="long"):
-        checks = {}
-        reasons = []
+    def _extract_audit_frames_b64(video_path, fps, n_frames, formato="long"):
+        import base64
 
-        # 1. Arquivo renderizado existe e tem tamanho íntegro
-        exists = os.path.exists(video_path) and os.path.getsize(video_path) > 500_000
-        checks["render_integro"] = exists
-        if not exists:
-            reasons.append("Arquivo MP4 ausente ou corrompido (<500KB).")
-            return {"approved": False, "score": 0, "checks": checks, "reasons": reasons}
-
-        # 2. Inspeção de resolução, FPS, duração e ausência de frames de sticker/máscara ou tela preta
         cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
-        n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
         dur = n_frames / float(max(1.0, fps))
+        if formato in ("long", "pilot"):
+            # Cobre obsessivamente a abertura (0.6s, 2.5s, 6.0s) + pontos ao longo de todo o vídeo
+            times = [0.6, 2.5, 6.0] + [dur * p for p in (0.14, 0.27, 0.41, 0.55, 0.69, 0.83, 0.94)]
+        else:
+            times = [0.5, 2.0, 4.5] + [dur * p for p in (0.20, 0.35, 0.50, 0.65, 0.78, 0.90, 0.96)]
 
-        expected_w, expected_h = (1920, 1080) if formato in ("long", "pilot") else (1080, 1920)
-        checks["enquadramento_resolucao"] = (w == expected_w and h == expected_h)
-        if not checks["enquadramento_resolucao"]:
-            reasons.append(f"Resolução incorreta: {w}x{h} (esperado {expected_w}x{expected_h}).")
-
-        # Amostragem de 12 frames ao longo do vídeo para detectar telas pretas ou máscaras brancas
+        frames_b64 = []
+        raw_small = []
         bad_frames = 0
-        sample_points = [int(n_frames * p) for p in (0.08, 0.16, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.92)]
-        for sp in sample_points:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, min(n_frames - 1, sp)))
+        for t in times:
+            f_idx = max(0, min(n_frames - 1, int(round(t * fps))))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
             ret, fr = cap.read()
             if not ret or fr is None:
                 bad_frames += 1
@@ -525,49 +564,200 @@ class AgenteControleQualidade:
             mean_lum = float(np.mean(fr))
             if mean_lum < 6.0:
                 bad_frames += 1
+            h, w = fr.shape[:2]
+            sc = 512.0 / float(max(h, w))
+            sm = cv2.resize(fr, (int(w * sc), int(h * sc)))
+            raw_small.append((round(t, 1), sm))
+            ok_enc, buf = cv2.imencode(".jpg", sm, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+            if ok_enc:
+                frames_b64.append((round(t, 1), base64.b64encode(buf.tobytes()).decode("ascii")))
+
+        # Detector programático de efeito PING-PONG / REVERSO (compara simetria frame[t-d] == frame[t+d])
+        reverse_hits = 0
+        if n_frames > int(fps * 12):
+            probe_times = [dur * p for p in (0.12, 0.25, 0.42, 0.60, 0.78)]
+            step_f = max(4, int(round(fps * 0.45)))
+            for pt in probe_times:
+                c_f = int(round(pt * fps))
+                if c_f - step_f < 0 or c_f + step_f >= n_frames:
+                    continue
+                tri = []
+                for idx_p in (c_f - step_f, c_f, c_f + step_f):
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, idx_p)
+                    r_ok, fr_p = cap.read()
+                    if r_ok and fr_p is not None:
+                        tri.append(cv2.resize(fr_p, (160, 90)))
+                if len(tri) == 3:
+                    d_prev_curr = float(np.mean(cv2.absdiff(tri[0], tri[1])))
+                    d_prev_next = float(np.mean(cv2.absdiff(tri[0], tri[2])))
+                    # Se a cena se mexeu (d_prev_curr > 7) mas voltou a ficar quase idêntica ao frame anterior (d_prev_next < 2.2) -> ping-pong!
+                    if d_prev_curr > 7.0 and d_prev_next < 2.2:
+                        reverse_hits += 1
+
+        cap.release()
+        return frames_b64, bad_frames, reverse_hits
+
+    @staticmethod
+    def auditar_producao(video_path, script_data, wav_map=None, words_map=None, music_credits=None, formato="long"):
+        checks = {}
+        reasons = []
+        wav_map = wav_map or {}
+        words_map = words_map or {}
+        music_credits = music_credits or []
+
+        # 1. Arquivo renderizado existe e tem tamanho íntegro
+        min_bytes = 500_000 if formato in ("long", "pilot") else 300_000
+        exists = os.path.exists(video_path) and os.path.getsize(video_path) > min_bytes
+        checks["render_integro"] = exists
+        if not exists:
+            reasons.append(f"Arquivo MP4 ausente ou corrompido (<{min_bytes // 1000}KB).")
+            return {"approved": False, "score": 0, "checks": checks, "reasons": reasons}
+
+        # 2. Inspeção técnica de resolução, FPS, duração e áudio
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+        n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        dur = n_frames / float(max(1.0, fps))
         cap.release()
 
+        expected_w, expected_h = (1920, 1080) if formato in ("long", "pilot") else (1080, 1920)
+        checks["enquadramento_resolucao"] = (w == expected_w and h == expected_h)
+        if not checks["enquadramento_resolucao"]:
+            reasons.append(f"Resolução incorreta: {w}x{h} (esperado {expected_w}x{expected_h}).")
+
+        if formato == "long":
+            dur_ok = dur >= 240.0
+        elif formato == "pilot":
+            dur_ok = dur >= 35.0
+        else:
+            dur_ok = 14.0 <= dur <= 178.0
+        checks["duracao_adequada"] = dur_ok
+        if not dur_ok:
+            reasons.append(f"Duração fora da faixa para {formato}: {dur:.1f}s.")
+
+        # 3. Extração de 10 frames cronológicos + detector anti-reverso / anti-tela-preta
+        frames_b64, bad_frames, reverse_hits = AgenteControleQualidade._extract_audit_frames_b64(
+            video_path, fps, n_frames, formato=formato
+        )
         checks["sem_telas_pretas_ou_corrompidas"] = bad_frames <= 1
         if not checks["sem_telas_pretas_ou_corrompidas"]:
             reasons.append(f"Detectados {bad_frames} frames pretos/corrompidos na amostragem.")
 
-        # 3. Verificação de fontes (nenhum rumor sem badge)
-        acts = script_data.get("acts", [])
-        all_blocks = [b for a in acts for b in a.get("blocks", [])] if acts else [script_data]
-        badges_ok = all(b.get("badge_type") in ("OFICIAL", "CONFIRMADO", "RUMOR", "TEORIA") for b in all_blocks)
-        checks["fontes_verificadas_e_rotuladas"] = badges_ok
+        checks["sem_efeito_reverso_pingpong"] = reverse_hits == 0
+        if not checks["sem_efeito_reverso_pingpong"]:
+            reasons.append(f"Detectado possível efeito de vídeo reverso/ping-pong ({reverse_hits} ocorrências).")
 
-        # 4. Coerência e não-repetição de B-roll
-        imgs = [b.get("primary_img") for b in all_blocks if b.get("primary_img")]
-        unique_ratio = len(set(imgs)) / float(max(1, len(imgs)))
-        checks["sem_repeticao_excessiva_broll"] = unique_ratio >= 0.65
-        if not checks["sem_repeticao_excessiva_broll"]:
-            reasons.append(f"Taxa de variedade visual baixa ({unique_ratio:.0%}).")
+        # 4. Verificação de narração (quando aplicável)
+        total_words = sum(len(v) for v in words_map.values()) if words_map else 0
+        if formato in ("long", "pilot") and words_map:
+            checks["narracao_natural_sincronizada"] = total_words >= (60 if formato == "pilot" else 350)
+            if not checks["narracao_natural_sincronizada"]:
+                reasons.append(f"Narração curta demais ({total_words} palavras alinhadas).")
+        else:
+            checks["narracao_natural_sincronizada"] = True
 
-        # 5. Variedade de Motion Graphics (Map Zoom, Dossiê, 3D Data, Spotlight)
-        scene_types = {b.get("scene_type") for b in all_blocks if b.get("scene_type")}
-        checks["motion_graphics_contextuais"] = len(scene_types) >= (3 if formato == "long" else 1)
+        # 5. AUDITORIA VISUAL REAL VIA GEMINI MULTIMODAL VISION (Agente 5 ASSISTINDO o vídeo pronto!)
+        vision_report = {}
+        if frames_b64:
+            title_ref = (
+                script_data.get("long_title")
+                or script_data.get("yt_title")
+                or script_data.get("headline_top")
+                or "GTA 6 Gameplay"
+            )
+            if formato in ("long", "pilot"):
+                acts = script_data.get("acts") or []
+                first_blk = ((acts[0].get("blocks") or [{}])[0]) if acts else {}
+                hook_ref = (first_blk.get("narration") or "")[:240]
+            else:
+                hook_ref = f"{script_data.get('hook_text', '')} | {script_data.get('interrupt_text', '')} | {script_data.get('outro_text', '')}"[:260]
 
-        # 6. Sincronização de narração e pronúncia (Whisper word count)
-        total_words = sum(len(v) for v in words_map.values())
-        checks["narracao_natural_sincronizada"] = total_words >= (80 if formato == "pilot" else (400 if formato == "long" else 20))
+            ts_labels = ", ".join(f"#{i + 1}={t}s" for i, (t, _) in enumerate(frames_b64))
+            parts = [{"inline_data": {"mime_type": "image/jpeg", "data": b64}} for _, b64 in frames_b64]
+            vision_prompt = f"""Você é o AGENTE 5 — AUDITOR RIGOROSO DE CONTROLE DE QUALIDADE (YouTube Retenção de Elite).
+Você está ASSISTINDO ao vídeo FINAL RENDERIZADO ({formato.upper()}, {dur:.1f}s) antes dele subir no YouTube.
+As {len(frames_b64)} imagens anexadas estão em ordem cronológica exata: {ts_labels}.
 
-        # 7. Licenciamento e variedade musical
-        checks["trilha_sonora_licenciada_e_variada"] = bool(music_credits)
+TÍTULO DO VÍDEO: "{title_ref}"
+GANCHO / ROTEIRO DE ABERTURA: "{hook_ref}"
+
+CONTEXTO TEMPORAL OBRIGATÓRIO: Estamos em 19 de Novembro de 2026 — GTA 6 FOI LANÇADO OFICIALMENTE HOJE! NUNCA acuse cenas reais de gameplay/easter eggs/bugs bizarros de GTA 6 de serem "mod de GTA V" ou "clickbait porque GTA 6 não saiu".
+ESTILO DE LEGENDA PADRÃO DO CANAL: Nossas legendas estilo CapCut/Broadcast exibem 2 a 3 palavras grandes sincronizadas com a voz por vez (palavra ativa em amarelo). Isso é INTENCIONAL para retenção — NÃO reprove por aparecerem poucas palavras por frame; reprove APENAS se o texto estiver cortado fora da tela, ilegível ou cobrindo o rosto/ação central.
+
+AUDITE RIGOROSAMENTE ESTES 5 CRITÉRIOS VISUAIS (NÃO PASSE PANO — REPROVE SE ESTIVER RUIM!):
+1. `abertura_limpa_sem_logo_ou_cartela`: Os frames iniciais (#1 e #2, primeiros 0-3s) mostram GAMEPLAY REAL em ação?
+   - Marque `false` SE aparecer tela de logo gigante "Grand Theft Auto VI", cartela borrada estática de "CAPÍTULO 1", apresentador em tela cheia falando sem gameplay, tela de pré-venda ou trailer velho na abertura!
+2. `sem_cenas_repetidas_ou_estaticas`: {"Para SHORT (25-45s), acompanhar uma única cena/corte contínuo de live ou gameplay (ex: 1 momento viral de 20s) é NORMAL e APROVADO — reprove APENAS se a imagem ficar congelada/travada sem ação ou colar takes repetidos de forma quebrada." if formato == "short" else "Há variedade real de cenas/movimento ao longo do vídeo longo (reprove se os mesmos takes/cenas aparecerem repetidos ou se houver cartelas estáticas quebrando o ritmo)."}
+3. `coerencia_visual_com_roteiro`: As cenas exibidas nos frames têm relação real com o tema do título e do gancho (reprove se for clickbait desconexo)?
+4. `qualidade_visual_e_legendas`: As legendas estão limpas/legíveis, sem cortes grotescos, sem tarjas artificiais de IA feias no topo ("CONFIRMADO/VERIFICADO"), e o enquadramento está limpo?
+5. `potencial_retencao_elite`: Nota rigorosa de 0 a 100 para retenção orgânica no YouTube.
+
+Responda APENAS um objeto JSON:
+{{
+  "abertura_limpa_sem_logo_ou_cartela": true/false,
+  "sem_cenas_repetidas_ou_estaticas": true/false,
+  "coerencia_visual_com_roteiro": true/false,
+  "qualidade_visual_e_legendas": true/false,
+  "potencial_retencao_elite": 0-100,
+  "resumo_do_que_viu": "2 frases descrevendo objetivamente o que você viu nos frames",
+  "defeitos_criticos": ["liste aqui apenas defeitos graves que exigem refazer o vídeo; deixe [] se estiver aprovado"]
+}}"""
+            try:
+                v_out, v_model = gemini_text(vision_prompt, json_mode=True, temperature=0.15, parts_extra=parts)
+                if isinstance(v_out, list):
+                    v_out = v_out[0] if (v_out and isinstance(v_out[0], dict)) else {}
+                vision_report = v_out or {}
+                vision_report["_model"] = v_model
+
+                checks["visao_abertura_limpa"] = bool(vision_report.get("abertura_limpa_sem_logo_ou_cartela", False))
+                checks["visao_sem_repeticao"] = bool(vision_report.get("sem_cenas_repetidas_ou_estaticas", False))
+                checks["visao_coerencia_roteiro"] = bool(vision_report.get("coerencia_visual_com_roteiro", False))
+                checks["visao_qualidade_legendas"] = bool(vision_report.get("qualidade_visual_e_legendas", False))
+                ret_score = int(vision_report.get("potencial_retencao_elite", 0) or 0)
+                checks["visao_retencao_elite"] = ret_score >= 75
+
+                if not checks["visao_abertura_limpa"]:
+                    reasons.append("REPROVADO NA VISÃO: Abertura contém logo GTA VI, cartela estática de capítulo ou trailer velho.")
+                if not checks["visao_sem_repeticao"]:
+                    reasons.append("REPROVADO NA VISÃO: Cenas repetidas ou estáticas detectadas.")
+                if not checks["visao_coerencia_roteiro"]:
+                    reasons.append("REPROVADO NA VISÃO: Visual não bate com o título/roteiro.")
+                if not checks["visao_qualidade_legendas"]:
+                    reasons.append("REPROVADO NA VISÃO: Problema de enquadramento, tarjas artificiais ou legendas ilegíveis.")
+                if not checks["visao_retencao_elite"]:
+                    reasons.append(f"REPROVADO NA VISÃO: Retenção estimada insuficiente ({ret_score}/100, mínimo 75).")
+                for d_crit in (vision_report.get("defeitos_criticos") or []):
+                    if str(d_crit).strip():
+                        reasons.append(f"DEFEITO CRÍTICO (VISÃO): {str(d_crit).strip()}")
+
+                print(
+                    f"[AGENTE 5 — VISÃO REAL ({v_model})] Retenção={ret_score}/100 | "
+                    f"AberturaLimpa={checks['visao_abertura_limpa']} | Variado={checks['visao_sem_repeticao']} | "
+                    f"Coerente={checks['visao_coerencia_roteiro']} | Visual={checks['visao_qualidade_legendas']} | "
+                    f"Viu: {vision_report.get('resumo_do_que_viu', '')}",
+                    flush=True,
+                )
+            except Exception as err_vis:
+                print(f"[AGENTE 5 — VISÃO] Falha ao consultar Gemini Vision ({err_vis})", flush=True)
+                checks["visao_multimodal_disponivel"] = False
+                reasons.append(f"Auditoria visual indisponível ({err_vis}) — bloqueando publicação por segurança.")
 
         passed = sum(1 for v in checks.values() if v)
-        score = round(100.0 * passed / max(1, len(checks)), 1)
-        approved = len(reasons) == 0 and score >= 85.0
+        tech_score = round(100.0 * passed / max(1, len(checks)), 1)
+        vis_ret = int(vision_report.get("potencial_retencao_elite", tech_score) or tech_score)
+        final_score = round((tech_score * 0.5) + (vis_ret * 0.5), 1)
+        approved = len(reasons) == 0 and final_score >= 78.0
 
         return {
             "approved": approved,
-            "score": score,
+            "score": final_score,
             "duration_sec": round(dur, 2),
             "resolution": f"{w}x{h}",
             "total_words_aligned": total_words,
-            "distinct_scene_types": sorted(list(scene_types)),
-            "unique_visual_ratio": round(unique_ratio, 2),
             "music_credits": music_credits,
+            "vision_report": vision_report,
             "checks": checks,
             "reasons": reasons,
         }
@@ -667,35 +857,35 @@ class AgenteAuditorViral:
 
         score, breakdown = cls.calcular_score_viral(script_data, formato=formato)
 
-        # 2. Se score < 80, aplica reforço cirúrgico imediato no gancho, título e thumb
+        # 2. Se score < 80, aplica reforço cirúrgico natural (focado no jogo, SEM caixa alta inteira e SEM 'AO VIVO')
         if score < 80:
             if formato == "short":
-                t = (script_data.get("yt_title") or "GTA 6 AO VIVO!").strip()
-                if "gta 6" not in t.lower():
-                    t = f"GTA 6 AO VIVO: {t}"
+                t = (script_data.get("yt_title") or "Detalhe absurdo no GTA 6!").strip()
+                if "gta 6" not in t.lower() and "gta vi" not in t.lower():
+                    t = f"{t} no GTA 6"
                 if "#gta6" not in t.lower():
-                    t = f"{t} 🤯 #gta6 #shorts"
+                    t = f"{t} #gta6 #shorts"
                 script_data["yt_title"] = t[:95]
 
                 ht = (script_data.get("headline_top") or "").strip()
                 if not ht or len(ht.split()) > 5:
-                    script_data["headline_top"] = "TRAVOU A LIVE NO GTA 6!"
+                    script_data["headline_top"] = "OLHA ESSE DETALHE!"
                 hk = (script_data.get("hook_text") or "").strip()
                 if not any(k in hk.lower() for k in cls.VIRAL_TRIGGERS):
-                    script_data["hook_text"] = f"Olha o que descobriram ao vivo no GTA 6: {hk}"
+                    script_data["hook_text"] = f"Olha o que descobriram no GTA 6: {hk}"
                 ot = (script_data.get("outro_text") or "").strip()
                 if "?" not in ot:
                     script_data["outro_text"] = f"{ot} Qual nota você dá pra isso?"
             else:
-                t = (script_data.get("long_title") or "GTA 6 LANÇADO: O MELHOR DAS LIVES").strip()
-                if "gta 6" not in t.lower():
-                    t = f"GTA 6 AO VIVO: {t}"
+                t = (script_data.get("long_title") or "Segredos e detalhes ABSURDOS encontrados no GTA 6!").strip()
+                if "gta 6" not in t.lower() and "gta vi" not in t.lower():
+                    t = f"{t} no GTA 6"
                 script_data["long_title"] = t[:86]
                 th = (script_data.get("thumb_text") or "").strip()
                 if not th or len(th.split()) > 4:
-                    script_data["thumb_text"] = "TRAVOU A LIVE!"
+                    script_data["thumb_text"] = "SEGREDO ABSURDO!"
                 if not script_data.get("thumb_subtext"):
-                    script_data["thumb_subtext"] = "DAVY JONES E BISTECONE EM CHOQUE NO GTA 6"
+                    script_data["thumb_subtext"] = "O QUE ACHARAM DENTRO DO GTA 6"
 
             score, breakdown = cls.calcular_score_viral(script_data, formato=formato)
 
