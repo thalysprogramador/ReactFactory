@@ -282,9 +282,14 @@ def get_all_verified_clip_catalog(v5_momentos=None):
         "gta6_vid_28.mp4",
         "gta6_live_flowgames_01.mp4",
         "gta6_live_davyjones_01.mp4",
+        "gta6_live_bistecone_01.mp4",
         "launch_v5_m1.mp4",
+        "launch_v5_m2.mp4",
         "launch_v5_m3.mp4",
         "launch_v5_m7.mp4",
+        "launch_san_beach.mp4",
+        "launch_san_ocean.mp4",
+        "launch_davy_street.mp4",
     }
     manifest_p = os.path.join(CLIPS_CURATED_DIR, "launch_manifest.json")
     if os.path.exists(manifest_p):
@@ -365,8 +370,15 @@ def select_semantic_assets(blocks, prefer_horizontal=True, research_data=None, f
         "gta6_vid_10.mp4",
         "gta6_vid_28.mp4",
         "gta6_live_flowgames_01.mp4",
+        "gta6_live_davyjones_01.mp4",
+        "gta6_live_bistecone_01.mp4",
+        "launch_v5_m1.mp4",
+        "launch_v5_m2.mp4",
         "launch_v5_m3.mp4",
         "launch_v5_m7.mp4",
+        "launch_san_beach.mp4",
+        "launch_san_ocean.mp4",
+        "launch_davy_street.mp4",
     }
     available_vids = {}
     for fname, meta in VIDEO_SEMANTIC_MAP.items():
