@@ -134,10 +134,13 @@ def discover_live_creator_videos(max_per_query=2):
     seen_ids = set()
     queries = list(LIVE_CREATOR_QUERIES)
     random.shuffle(queries)
+    from producao.pesquisa_ao_vivo import _ytdlp_cmd  # noqa: WPS433
+
+    mode_yt = "cookies" if os.environ.get("GITHUB_ACTIONS") == "true" else "default"
     for q in queries[:4]:
         try:
             r = subprocess.run(
-                [sys.executable, "-m", "yt_dlp", "--flat-playlist", "--dump-json", q],
+                _ytdlp_cmd(mode_yt) + ["--flat-playlist", "--dump-json", q],
                 capture_output=True,
                 text=True,
                 timeout=18,
@@ -205,8 +208,11 @@ def harvest_live_influencer_clips(research_data, ffmpeg_exe, max_new=6):
             continue
         raw_dst = dst + ".raw.mp4"
         try:
-            cmd = [
-                sys.executable, "-m", "yt_dlp", "--ffmpeg-location", ffmpeg_exe,
+            from producao.pesquisa_ao_vivo import _ytdlp_cmd  # noqa: WPS433
+
+            mode_yt = "cookies" if os.environ.get("GITHUB_ACTIONS") == "true" else "default"
+            cmd = _ytdlp_cmd(mode_yt) + [
+                "--ffmpeg-location", ffmpeg_exe,
                 "-f", "bv*[height<=720][vcodec^=avc1]/bv*[height<=720]/b",
                 "--download-sections", sec_range,
                 "--merge-output-format", "mp4",
