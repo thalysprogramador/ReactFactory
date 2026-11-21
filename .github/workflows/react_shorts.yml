@@ -33,7 +33,7 @@ jobs:
       - name: Start YouTube PO Token Server (bgutil Docker)
         run: |
           docker run -d --name bgutil-pot -p 4416:4416 --init brainicism/bgutil-ytdlp-pot-provider || true
-          sleep 3
+          for i in {1..15}; do curl -sf http://127.0.0.1:4416/ping >/dev/null && break || sleep 2; done
 
       - name: Install Python Dependencies
         run: |
