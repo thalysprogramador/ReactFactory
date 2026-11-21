@@ -413,23 +413,80 @@ def _build_rockstar_montage_clip(mp4_vault, jpg_vault, output_path, bgm_path=Non
 def hunt_gta6_short_source(output_path=None):
     """
     Retorna fonte + research_brief para um Short PRO de GTA 6:
-    alterna entre cortes reais do TikTok gamer BR e montagens oficiais 1080p da Rockstar Games.
+    1. Checa se há um corte especial agendado em `data/special_short_queue.json` para o horário atual.
+    2. Executa pesquisa ampla em tempo real (`pesquisar_do_zero`) com trava visual 1-para-1 e áudio original.
     """
     if output_path is None:
         output_path = os.path.join(GTA6_TEMP_DIR, "viral_raw.mp4")
 
+    # 0. Checa fila de cortes especiais pedidos pelo usuário (ex: Short 09 às 21:50 — IShowSpeed + Gigante Hulk)
+    special_q_file = os.path.join(DATA_DIR, "special_short_queue.json")
+    if os.path.exists(special_q_file):
+        try:
+            q_items = json.load(open(special_q_file, encoding="utf-8"))
+            now_local = datetime.now()
+            now_mins = now_local.hour * 60 + now_local.minute
+            for item in q_items:
+                if item.get("used"):
+                    continue
+                target_mins = int(item.get("after_hour", 0)) * 60 + int(item.get("after_minute", 0))
+                cp = item.get("clip_path", "")
+                if now_mins >= target_mins and cp and os.path.exists(cp):
+                    import shutil
+                    shutil.copyfile(cp, output_path)
+                    item["used"] = True
+                    with open(special_q_file, "w", encoding="utf-8") as sf:
+                        json.dump(q_items, sf, ensure_ascii=False, indent=2)
+                    dur = get_media_duration(output_path)
+                    desc = item.get("desc", "Momento insano no GTA 6")
+                    ch = item.get("channel", "IShowSpeed")
+                    print(f"[SHORT ESPECIAL] Ativado: {item.get('id')} ({ch}) | {desc[:90]}", flush=True)
+                    return {
+                        "id": item.get("id", "gta6_special"),
+                        "source": ch,
+                        "title": desc[:120],
+                        "description": desc,
+                        "duration": dur,
+                        "views": 650_000,
+                        "views_per_day": 650_000,
+                        "age_days": 0.2,
+                        "outlier_score": 5.0,
+                        "url": f"https://www.youtube.com/watch?v={item.get('video_id', '')}",
+                        "path": output_path,
+                        "research_brief": {
+                            "chosen_angle": desc,
+                            "exact_clip_description": desc,
+                            "clip_channel": ch,
+                        },
+                        "vault_jpgs": [],
+                    }
+        except Exception as e_sp:
+            print(f"[SHORT ESPECIAL] Aviso: {e_sp}", flush=True)
+
     research = research_gta6_references(kind="short")
     v5_moms = []
-    try:
-        from producao.pesquisa_ao_vivo import pesquisar_do_zero  # noqa: WPS433
+    from producao.pesquisa_ao_vivo import pesquisar_do_zero  # noqa: WPS433
 
-        pauta_v5, v5_moms = pesquisar_do_zero(FFMPEG_EXE)
-    except Exception as err_v5:
-        print(f"[PESQUISA V5 SHORT] Aviso fallback: {err_v5}", flush=True)
+    for attempt_v5 in (1, 2):
+        try:
+            pauta_v5, v5_moms = pesquisar_do_zero(FFMPEG_EXE)
+            valid_clips = [m for m in v5_moms if m.get("clip") and os.path.exists(m["clip"])]
+            if valid_clips:
+                break
+            print(f"[PESQUISA V5 SHORT] Tentativa {attempt_v5}/2 obteve 0 clipes novos validados -> retentando busca ampla...", flush=True)
+        except Exception as err_v5:
+            print(f"[PESQUISA V5 SHORT] Aviso tentativa {attempt_v5}/2: {err_v5}", flush=True)
 
-    # Trava Visual 1-para-1 (V5.2): usa SOMENTE o melhor clipe real validado (ou 2 do mesmo assunto),
-    # NUNCA mistura trailers antigos nem cenas aleatórias que não batem com o que o narrador vai falar!
+    # Trava Visual 1-para-1 (V7.5 — ZERO CATÁLOGO ANTIGO REPETIDO!):
+    # Usa SOMENTE clipes reais RECÉM-BAIXADOS e validados na pesquisa ao vivo desta execução!
+    # Se mesmo após 2 buscas amplas não houver clipe novo validado, BLOQUEIA em vez de publicar clipe velho do catálogo!
     valid_clips = [m for m in v5_moms if m.get("clip") and os.path.exists(m["clip"])]
+    if not valid_clips:
+        raise RuntimeError(
+            "BLOQUEADO (ZERO REPETIÇÃO): Pesquisa ao vivo não obteve nenhum clipe novo validado nesta execução. "
+            "Upload cancelado para NUNCA repetir clipes antigos do catálogo!"
+        )
+
     if valid_clips:
         valid_clips.sort(
             key=lambda m: (
