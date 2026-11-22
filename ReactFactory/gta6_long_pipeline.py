@@ -71,9 +71,11 @@ def run_gta6_long_pipeline(do_upload=False):
             research, direcao, num_acts=5, blocks_per_act=6
         )
     except Exception as err_ag2:
-        print(f"[GTA6 STUDIO] Aviso Agente 2 ({err_ag2}) -> usando gerador de contingência.")
+        print(f"[GTA6 STUDIO] Aviso Agente 2 ({err_ag2}) -> usando gerador completo 30 blocos com sincronização V7.9.")
         script_data = generate_gta6_long_script(research)
-        script_data["acts"] = AgenteDiretorCriativo.enriquecer_storyboard(script_data.get("acts", []), formato="long")
+        script_data["acts"] = AgenteDiretorCriativo.enriquecer_storyboard(
+            script_data.get("acts", []), formato="long", research_data=research
+        )
 
     # Define thumb_hero_path apenas se tivermos um momento ao vivo validado de altíssima nota visual (>= 9);
     # caso contrário, deixa a seleção semântica de `studio_composer.py` escolher a imagem exata pelo tema do título!
