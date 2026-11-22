@@ -556,8 +556,8 @@ class AgenteControleQualidade:
         cap = cv2.VideoCapture(video_path)
         dur = n_frames / float(max(1.0, fps))
         if formato in ("long", "pilot"):
-            # Cobre obsessivamente a abertura (0.6s, 2.5s, 6.0s) + pontos ao longo de todo o vídeo
-            times = [0.6, 2.5, 6.0] + [dur * p for p in (0.14, 0.27, 0.41, 0.55, 0.69, 0.83, 0.94)]
+            # Frame #1 (0.8s) e #2 (3.5s) inspecionam a abertura; frames #3..#10 cobrem de 10% a 93% do vídeo!
+            times = [0.8, 3.5] + [dur * p for p in (0.10, 0.22, 0.34, 0.46, 0.58, 0.70, 0.82, 0.93)]
         else:
             times = [0.5, 2.0, 4.5] + [dur * p for p in (0.20, 0.35, 0.50, 0.65, 0.78, 0.90, 0.96)]
 
@@ -697,9 +697,9 @@ CONTEXTO TEMPORAL OBRIGATÓRIO: Estamos em 19 de Novembro de 2026 — GTA 6 FOI 
 ESTILO DE LEGENDA PADRÃO DO CANAL: Nossas legendas estilo CapCut/Broadcast exibem 2 a 3 palavras grandes sincronizadas com a voz por vez (palavra ativa em amarelo). Isso é INTENCIONAL para retenção — NÃO reprove por aparecerem poucas palavras por frame; reprove APENAS se o texto estiver cortado fora da tela, ilegível ou cobrindo o rosto/ação central.
 
 AUDITE RIGOROSAMENTE ESTES 5 CRITÉRIOS VISUAIS (NÃO PASSE PANO — REPROVE SE ESTIVER RUIM!):
-1. `abertura_limpa_sem_logo_ou_cartela`: Os frames iniciais (#1 e #2, primeiros 0-3s) mostram GAMEPLAY REAL em ação?
+1. `abertura_limpa_sem_logo_ou_cartela`: Os frames iniciais (#1 em 0.8s e #2 em 3.5s, que pertencem à mesma cena inicial de gancho) mostram GAMEPLAY REAL em ação?
    - Marque `false` SE aparecer tela de logo gigante "Grand Theft Auto VI", cartela borrada estática de "CAPÍTULO 1", apresentador em tela cheia falando sem gameplay, tela de pré-venda ou trailer velho na abertura!
-2. `sem_cenas_repetidas_ou_estaticas`: {"Para SHORT (25-45s), acompanhar uma única cena/corte contínuo de live ou gameplay (ex: 1 momento viral de 20s) é NORMAL e APROVADO — reprove APENAS se a imagem ficar congelada/travada sem ação ou colar takes repetidos de forma quebrada." if formato == "short" else "Há variedade real de cenas/movimento ao longo do vídeo longo (reprove se os mesmos takes/cenas aparecerem repetidos ou se houver cartelas estáticas quebrando o ritmo)."}
+2. `sem_cenas_repetidas_ou_estaticas`: {"Para SHORT (25-45s), acompanhar uma única cena/corte contínuo de live ou gameplay (ex: 1 momento viral de 20s) é NORMAL e APROVADO — reprove APENAS se a imagem ficar congelada/travada sem ação ou colar takes repetidos de forma quebrada." if formato == "short" else "Nota: #1 (0.8s) e #2 (3.5s) são da mesma tomada inicial de abertura (normal serem da mesma cena). Avalie se entre os frames #2, #3, #4, #5, #6, #7, #8, #9 e #10 há variedade real de cenas/movimento ao longo do vídeo (Nota: diferentes cenas de direção/carros em locais diferentes de GTA 6 fazem parte natural do jogo e SÃO válidas; reprove APENAS se o vídeo ficar congelado na mesma imagem estática)."}
 3. `coerencia_visual_com_roteiro`: As cenas exibidas nos frames têm relação real com o tema do título e do gancho (reprove se for clickbait desconexo)?
 4. `qualidade_visual_e_legendas`: As legendas estão limpas/legíveis, sem cortes grotescos, sem tarjas artificiais de IA feias no topo ("CONFIRMADO/VERIFICADO"), e o enquadramento está limpo?
 5. `potencial_retencao_elite`: Nota rigorosa de 0 a 100 para retenção orgânica no YouTube.
