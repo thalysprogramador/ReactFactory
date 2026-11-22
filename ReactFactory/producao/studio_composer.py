@@ -608,35 +608,10 @@ def compose_studio_video(script_data, wav_map, words_map, work_dir, output_mp4, 
         mm, ss = divmod(int(total_t), 60)
         chapters_ts.append(f"{mm}:{ss:02d} {act_title}")
 
-        # RETENÇÃO ELITE V7:
-        # - Ato 1 (a_idx == 0) NUNCA tem cartela borrada de capítulo! Começa em 0:00 direto na gameplay de alto impacto + gancho!
-        # - Atos 2-5 usam divisor editorial rápido (1.10s) apenas para respirar entre capítulos.
-        if a_idx > 0:
-            first_img = (act.get("blocks") or [{}])[0].get("primary_img")
-            card_jpg = os.path.join(work_dir, f"act_{act_num}_card.jpg")
-            _make_chapter_card_jpg(act_num, act_title, first_img, card_jpg)
-            card_vis = os.path.join(work_dir, f"card_act{act_num:02d}_vis.mp4")
-            _render_kenburns_cv2(card_jpg, 1.10, card_vis, zoom_in=True, fps=24)
-            card_mp4 = os.path.join(work_dir, f"seg_act{act_num:02d}_00_card.mp4")
-            subprocess.run(
-                [
-                    FFMPEG_EXE, "-y", "-i", card_vis,
-                    "-i", sfx_pack["sub_drop"], "-stream_loop", "-1", "-i", bgm_file,
-                    "-filter_complex",
-                    "[1:a]volume=0.55[s];[2:a]atrim=0:1.10,volume=0.75[b];[s][b]amix=inputs=2:duration=longest:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[a]",
-                    "-map", "0:v", "-map", "[a]", "-t", "1.10",
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
-                    "-video_track_timescale", "24000", card_mp4,
-                ],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            ordered_segments.append(card_mp4)
-            total_t += 1.10
-            bgm_offset = 1.10
-        else:
-            bgm_offset = 0.0
+        # RETENÇÃO ELITE V9.3:
+        # ZERO cartelas borradas estáticas de capítulo (nem no Ato 1 nem nos Atos 2-5):
+        # 100% gameplay real contínuo de ponta a ponta (evita queda de retenção e reprovação por tela estática no Agente 5!).
+        bgm_offset = 0.0
 
         for b_idx, blk in enumerate(act.get("blocks", [])):
             bid = f"a{act_num}_b{b_idx}"
