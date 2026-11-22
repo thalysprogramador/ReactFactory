@@ -316,27 +316,12 @@ def _render_block_video(job, fallback_clips, sfx_pack, work_dir):
             frames_v1 = frames_v0
             f2_end = min(total_frames, f1_end + max(24, len(frames_v1) - 2))
     elif sync_lock:
-        # Edição Dinâmica Profissional V7.9 (2 cenas relacionadas por bloco de 16-18s, 100% PARA FRENTE!):
-        # - Primeira metade (~52%, ~9s): roda o clipe principal sincronizado (`frames_v0`) 100% para frente.
-        # - Segunda metade (~48%, ~8s): cross-dissolve suave de 10 frames para a 2ª cena relacionada (`frames_v1`) 100% para frente!
-        # - Como cada metade dura apenas ~8-9s e os clipes têm 15-24s, NUNCA chega ao fim do clipe (zero congelamento, zero reverso e 2x mais ritmo visual!).
-        if len(sem_vids) >= 2 and len(frames_v1) >= 48 and frames_v1 is not frames_v0:
-            f1_end = min(max(36, len(frames_v0) - 2), int(total_frames * 0.52))
-            rem_after_v0 = total_frames - f1_end
-            if len(frames_v1) >= rem_after_v0:
-                f2_end = total_frames
-            else:
-                f2_end = max(f1_end + 24, min(total_frames - 12, f1_end + len(frames_v1) - 2))
-        elif len(frames_v0) >= total_frames:
-            f1_end = total_frames
-            f2_end = total_frames
-        else:
-            f1_end = max(24, min(total_frames - 12, len(frames_v0) - 2))
-            rem_after_v0 = total_frames - f1_end
-            if len(frames_v1) >= rem_after_v0:
-                f2_end = total_frames
-            else:
-                f2_end = max(f1_end + 24, min(total_frames - 12, f1_end + len(frames_v1) - 2))
+        # TRAVA V8 ABSOLUTA (1 BLOCO = 1 ÚNICO CLIPE SINCRONIZADO DO INÍCIO AO FIM DA FALA — ZERO CORTE PARA CENA DESCONEXA!):
+        # - A narração do bloco foi escrita especificamente para `sem_vids[0]` (que tem 18-24s de duração).
+        # - Portanto, exibimos EXCLUSIVAMENTE `frames_v0` (100% para frente) durante todo o bloco!
+        # - NUNCA corta no meio da frase para um 2º clipe de outro assunto e NUNCA repete clipes de outros blocos!
+        f1_end = total_frames
+        f2_end = total_frames
     else:
         f1_end = min(len(frames_v0) - 2 if len(frames_v0) > 26 else total_frames, int(total_frames * 0.34))
         f2_end = min(f1_end + max(24, len(frames_v1) - 2), int(total_frames * 0.67))
