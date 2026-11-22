@@ -216,7 +216,7 @@ def _draw_word_caption_pil(frame_bgr, words, t_sec):
     bb = draw.textbbox((0, 0), full_str, font=font)
     tw = bb[2] - bb[0]
     x0 = (1920 - tw) // 2
-    y0 = 928
+    y0 = 885
 
     xc = x0
     for idx_in_chunk, tok in enumerate(tokens):
