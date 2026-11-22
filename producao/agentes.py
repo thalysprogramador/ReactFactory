@@ -399,6 +399,7 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
     wav_map = {}
     words_map = {}
     engine_counts = {}
+    block_engine = {}
     last_gemini_call_t = 0.0
     gemini_consec_fails = 0
     force_uniform_edge = False
@@ -449,6 +450,7 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
                         gemini_consec_fails = 0
                         m_used = resp.get("_model", "gemini-2.5-flash-preview-tts")
                         engine_counts[m_used] = engine_counts.get(m_used, 0) + 1
+                        block_engine[bid] = m_used
                 except Exception as e_gem:
                     gemini_consec_fails += 1
                     print(f"[VOICE STUDIO] Aviso Gemini TTS no bloco {bid} ({e_gem}) -> fallback Edge-TTS Neural", flush=True)
@@ -464,6 +466,7 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
                 if os.path.exists(mp3_tmp):
                     os.remove(mp3_tmp)
                 engine_counts["edge_tts"] = engine_counts.get("edge_tts", 0) + 1
+                block_engine[bid] = "edge_tts"
 
             if os.path.exists(raw_wav):
                 try:
@@ -480,10 +483,11 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
             w_ts = [{"w": w, "s": round(i * span, 2), "e": round((i + 1) * span, 2)} for i, w in enumerate(raw_words)]
         words_map[bid] = w_ts
 
-    # Se caiu em force_uniform_edge no meio e havia poucos blocos anteriores em Gemini, padroniza TODOS em Edge-TTS
-    if force_uniform_edge and any(k != "edge_tts" for k in engine_counts):
-        print("[VOICE STUDIO] Uniformizando blocos iniciais para Edge-TTS Neural (zero troca de voz no mesmo vídeo!)", flush=True)
-        for blk in blocks:
+    # Se caiu em force_uniform_edge no meio, re-gera APENAS os poucos blocos iniciais que não eram edge_tts!
+    if force_uniform_edge and any(v != "edge_tts" for v in block_engine.values()):
+        non_edge = [blk for blk in blocks if block_engine.get(blk["id"]) != "edge_tts"]
+        print(f"[VOICE STUDIO] Uniformizando {len(non_edge)} bloco(s) iniciais para Edge-TTS Neural (zero troca de voz no mesmo vídeo!)", flush=True)
+        for blk in non_edge:
             bid = blk["id"]
             out_wav = wav_map[bid]
             clean_text = normalize_ptbr_phonetics(blk["narration"])
@@ -492,7 +496,6 @@ def synthesize_studio_narration_batch(blocks, work_dir, ffmpeg_exe, voice_name="
             _master_voice_wav(mp3_tmp, out_wav)
             if os.path.exists(mp3_tmp):
                 os.remove(mp3_tmp)
-            dur = get_audio_duration(out_wav)
             words_map[bid] = extract_word_timestamps(out_wav, ffmpeg_exe, reference_text=blk["narration"])
         engine_counts = {"edge_tts_uniform": len(blocks)}
 
