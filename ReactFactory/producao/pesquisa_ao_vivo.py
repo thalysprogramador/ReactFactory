@@ -58,19 +58,21 @@ def _ensure_cookies_file():
 
 def _ytdlp_cmd(mode="default"):
     """
-    Constrói comando yt-dlp resiliente para PC residencial e nuvem (com JS runtime Node/Deno + EJS + bgutil PO Token):
+    Constrói comando yt-dlp resiliente para PC residencial e nuvem (com JS runtime Node/Deno + EJS + bgutil PO Token + Proxy opcional):
+    - Se YTDLP_PROXY estiver configurado (ex: proxy residencial no GitHub Secrets), passa --proxy automaticamente!
     - mode="default": yt-dlp padrão + Node/Deno EJS (funciona 100% no IP residencial!)
-    - mode="pot_nocookies": sem cookies + PO Token via bgutil-pot (http://127.0.0.1:4416) -> imune a rate-limit de conta!
+    - mode="pot_nocookies": sem cookies + PO Token via bgutil-pot (http://127.0.0.1:4416)
     - mode="cookies": usa cópia limpa dos cookies autenticados + PO Token bgutil-pot
-    - mode="alt": cookies + player_client=mweb,web + PO Token bgutil-pot
-    - mode="tv": player_client=tv_embedded,mweb (sem cookies)
     """
     cmd = list(YTDLP)
+    proxy_url = (os.environ.get("YTDLP_PROXY") or "").strip()
+    if proxy_url:
+        cmd += ["--proxy", proxy_url]
     is_cloud = os.environ.get("GITHUB_ACTIONS") == "true"
-    pot_arg = ";youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416" if is_cloud else ""
+    pot_arg = ";youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416" if (is_cloud and not proxy_url) else ""
 
     if mode == "default":
-        if is_cloud:
+        if is_cloud and not proxy_url:
             cmd += ["--extractor-args", f"youtube:player_client=mweb,web{pot_arg}"]
     elif mode == "pot_nocookies":
         cmd += ["--extractor-args", f"youtube:player_client=mweb,web,tv_embedded{pot_arg}"]
@@ -387,18 +389,17 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
             # e usa --downloader ffmpeg com -ss/-to direto (funciona em VODs longos sem erro 4294967262!).
             if os.environ.get("GITHUB_ACTIONS") == "true":
                 strategies = [
-                    ("pot_nocookies", "ffmpeg_slice", "bv*[height<=720]+ba/b[height<=720]/b"),
-                    ("pot_nocookies", "sections", "bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("default", "sections", "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b")
+                    if os.environ.get("YTDLP_PROXY")
+                    else ("pot_nocookies", "ffmpeg_slice", "bv*[height<=720]+ba/b[height<=720]/b"),
                     ("cookies", "ffmpeg_slice", "bv*[height<=720]+ba/b[height<=720]/b"),
                     ("cookies", "sections", "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
-                    ("tv", "ffmpeg_slice", "b[height<=720]/b"),
                 ]
             else:
+                # Local residencial: 2 estratégias rápidas (timeout 40s) -> baixa 15 clipes em ~2 min em vez de 25 min!
                 strategies = [
                     ("default", "sections", "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
                     ("default", "ffmpeg_slice", "bv*[height<=720]+ba/b[height<=720]/b"),
-                    ("cookies", "sections", "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
-                    ("cookies", "ffmpeg_slice", "bv*[height<=720]+ba/b[height<=720]/b"),
                 ]
             errs = []
             for mode, cut_mode, fmt in strategies:
@@ -419,7 +420,7 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
                         "--downloader-args", f"ffmpeg_i:-ss {s:.2f} -to {e:.2f}",
                     ]
                 cmd.append(f"https://www.youtube.com/watch?v={vid}")
-                r_dl = _run(cmd, timeout=110)
+                r_dl = _run(cmd, timeout=45)
                 if os.path.exists(raw) and os.path.getsize(raw) > 50_000:
                     trimmed_in_raw = True
                     break
