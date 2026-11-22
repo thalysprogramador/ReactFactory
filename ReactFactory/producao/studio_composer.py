@@ -316,8 +316,18 @@ def _render_block_video(job, fallback_clips, sfx_pack, work_dir):
             frames_v1 = frames_v0
             f2_end = min(total_frames, f1_end + max(24, len(frames_v1) - 2))
     elif sync_lock:
-        # Bloco de gameplay puro: roda frames_v0 100% PARA FRENTE; se acabar antes da fala, corta limpo para frames_v1 e frames_v2!
-        if len(frames_v0) >= total_frames:
+        # Edição Dinâmica Profissional V7.9 (2 cenas relacionadas por bloco de 16-18s, 100% PARA FRENTE!):
+        # - Primeira metade (~52%, ~9s): roda o clipe principal sincronizado (`frames_v0`) 100% para frente.
+        # - Segunda metade (~48%, ~8s): cross-dissolve suave de 10 frames para a 2ª cena relacionada (`frames_v1`) 100% para frente!
+        # - Como cada metade dura apenas ~8-9s e os clipes têm 15-24s, NUNCA chega ao fim do clipe (zero congelamento, zero reverso e 2x mais ritmo visual!).
+        if len(sem_vids) >= 2 and len(frames_v1) >= 48 and frames_v1 is not frames_v0:
+            f1_end = min(max(36, len(frames_v0) - 2), int(total_frames * 0.52))
+            rem_after_v0 = total_frames - f1_end
+            if len(frames_v1) >= rem_after_v0:
+                f2_end = total_frames
+            else:
+                f2_end = max(f1_end + 24, min(total_frames - 12, f1_end + len(frames_v1) - 2))
+        elif len(frames_v0) >= total_frames:
             f1_end = total_frames
             f2_end = total_frames
         else:
