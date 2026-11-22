@@ -216,8 +216,22 @@ def fetch_sample_comments(access_token, video_ids, limit_videos=3):
     return comments
 
 
+def _get_working_youtube_token():
+    """Rotaciona entre os Projetos YT #1, #2 e #3 (se o #1 expirar/revogar, usa o #2 ou #3 automaticamente)."""
+    last_err = None
+    for idx in (1, 2, 3):
+        try:
+            tok = get_youtube_access_token(idx)
+            if tok:
+                return tok
+        except Exception as err:
+            print(f"[ANALYST] Projeto YT #{idx} indisponível ({err}) -> tentando próximo...")
+            last_err = err
+    raise RuntimeError(f"Nenhum token YouTube OAuth ativo para o relatório semanal: {last_err}")
+
+
 def build_weekly_metrics(days=7):
-    token = get_youtube_access_token(1)
+    token = _get_working_youtube_token()
     channel, videos, has_recent = fetch_channel_and_weekly_videos(token, days=days)
     analytics = fetch_youtube_analytics(token, days=days)
 
