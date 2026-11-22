@@ -1,4 +1,4 @@
-name: GTA 6 Pro Long Video (1x/Dia)
+name: GTA 6 Pro Long Video (2x/Dia)
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ permissions:
 jobs:
   produce-and-upload-long:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 90
 
     steps:
       - name: Checkout Repository
