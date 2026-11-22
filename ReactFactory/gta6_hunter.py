@@ -496,8 +496,9 @@ def hunt_gta6_short_source(output_path=None):
             reverse=True,
         )
         best_m = valid_clips[0]
-        same_topic = [m for m in valid_clips[1:] if m.get("assunto") == best_m.get("assunto")][:1]
-        chosen_moms = [best_m] + same_topic
+        # V9.1 TRAVA 1-PARA-1 ABSOLUTA: 1 Short = 1 ÚNICO clipe real do início ao fim!
+        # NUNCA costura 2 streamers/cenas diferentes no mesmo Short de 25s para evitar qualquer desalinhamento narração↔cena.
+        chosen_moms = [best_m]
 
         # Constrói viral_raw.mp4 SOMENTE com o(s) clipe(s) validado(s) preservando 100% do áudio original!
         segs = []
