@@ -77,23 +77,10 @@ class AgenteDiretorCriativo:
                 st = "cinema_broll"
 
                 # Máximo 3 animações Remotion no vídeo inteiro (e no máximo 1 de cada tipo, só quando couber!)
-                if not remotion_used_in_act and len(used_remotion_types) < 3:
-                    if "map_zoom" not in used_remotion_types and any(
-                        k in txt for k in ["mapa", "leonida keys", "grassrivers", "gellhorn", "kalaga", "ambrosia", "arquipélago"]
-                    ):
-                        st = "map_zoom"
-                    elif "character_dossier" not in used_remotion_types and any(
-                        k in txt for k in ["lucia", "jason", "protagonista", "casal", "dossiê"]
-                    ):
-                        st = "character_dossier"
-                    elif "data_comparison" not in used_remotion_types and any(
-                        k in txt for k in ["compar", "gta 5", "gta v", "evolução", "salto", "recorde"]
-                    ):
-                        st = "data_comparison"
-
-                    if st != "cinema_broll":
-                        remotion_used_in_act = True
-                        used_remotion_types.add(st)
+                # V9.3 RETENÇÃO MÁXIMA E COERÊNCIA 100% (ZERO CARTELA/DOSSIÊ ESTÁTICO!):
+                # 100% dos blocos usam gameplay real em tela cheia (`cinema_broll`) sincronizado 1-para-1 com a narração,
+                # eliminando telas estáticas de dossiê/menu que causavam reprovação no Agente 5!
+                st = "cinema_broll"
 
                 # TRAVA DETERMINÍSTICA V8 (PROIBIDO TROCAR O CLIPE DEPOIS QUE O ROTEIRO FOI ESCRITO!):
                 # - Se o bloco já recebeu seu `clip_id` travado antes da escrita do roteiro (`locked_clip=True` ou presente no catálogo),
@@ -232,14 +219,13 @@ REGRAS ABSOLUTAS DE SINCRONIZAÇÃO E QUALIDADE (ZERO TOLERÂNCIA A ERROS):
 3. GANCHO FORTE NO ATO 1 BLOCO 1 + CTA NATURAL NO ÚLTIMO BLOCO:
    - Comece direto na cena/descoberta mais impactante (proibido "Olá pessoal").
    - Feche o último bloco com uma pergunta envolvente para comentários e CTA natural de inscrição.
-4. ANIMAÇÕES REMOTION APENAS QUANDO COUBER (NO MÁXIMO 3 NO VÍDEO INTEIRO):
-   - Use `"scene_type": "cinema_broll"` em ~90% dos blocos (gameplay puro com áudio original).
-   - Use `"map_zoom"` (no máximo 1x no vídeo, quando falar de uma região específica do mapa de Leonida), `"character_dossier"` (no máximo 1x no vídeo, quando apresentar Lucia/Jason) e `"data_comparison"` (no máximo 1x no vídeo, quando fizer comparativo GTA V vs GTA VI).
+4. 100% GAMEPLAY REAL EM TELA CHEIA (ZERO CARTELAS DE DOSSIÊ OU MENU):
+   - Use `"scene_type": "cinema_broll"` em 100% dos blocos (gameplay puro com áudio original do clipe).
 5. TÍTULO DE BUSCA CAUDA LONGA & THUMBNAIL 100% COERENTE (SEM TUDO EM CAIXA ALTA):
    - "long_title": Título natural em português com foco em busca real de lançamento (ex: "10 Segredos e Detalhes ABSURDOS já Encontrados no GTA 6!", "Bugs BIZARROS e Coisas Escondidas no Mapa do GTA 6"). PROIBIDO escrever o título inteiro em MAIÚSCULAS — destaque no máximo 1 ou 2 palavras fortes em MAIÚSCULAS!
    - "thumb_text": 2 a 4 palavras chamativas sobre o tema central do vídeo (ZERO selos "AO VIVO" ou "LIVES").
    - "thumb_subtext": Frase curta complementar sobre o jogo (máx 40 chars).
-6. Cada bloco deve ter entre 36 e 54 palavras (~16 a 19 segundos de fala natural em português brasileiro).
+6. Cada bloco deve ter entre 44 e 62 palavras (~20 a 25 segundos de fala natural em português brasileiro, para que o vídeo longo ultrapasse 8 minutos com retenção alta).
 
 Retorne APENAS JSON válido no formato:
 {{
