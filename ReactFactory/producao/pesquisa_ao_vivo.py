@@ -384,24 +384,24 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
             last_err = ""
 
             # No GitHub Actions (nuvem), prioriza pot_nocookies (PO Token via bgutil sem gastar rate-limit da conta!)
-            # e inclui download sem --download-sections (corte local no FFmpeg -> evita 'ffmpeg exited with code 8'!).
+            # e usa --downloader ffmpeg com -ss/-to direto (funciona em VODs longos sem erro 4294967262!).
             if os.environ.get("GITHUB_ACTIONS") == "true":
                 strategies = [
-                    ("pot_nocookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]/b"),
-                    ("pot_nocookies", True, "bv*[height<=720]+ba/b[height<=720]/b"),
-                    ("cookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]/b"),
-                    ("cookies", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
-                    ("tv", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b"),
+                    ("pot_nocookies", "ffmpeg_slice", "bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("pot_nocookies", "sections", "bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("cookies", "ffmpeg_slice", "bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("cookies", "sections", "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("tv", "ffmpeg_slice", "b[height<=720]/b"),
                 ]
             else:
                 strategies = [
-                    ("default", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
-                    ("default", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
-                    ("cookies", True, "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
-                    ("cookies", False, "b[height<=720][filesize<65M]/b[height<=480][filesize<65M]/b[height<=720]"),
+                    ("default", "sections", "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("default", "ffmpeg_slice", "bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("cookies", "sections", "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=720]+ba/b[height<=720]/b"),
+                    ("cookies", "ffmpeg_slice", "bv*[height<=720]+ba/b[height<=720]/b"),
                 ]
             errs = []
-            for mode, use_sections, fmt in strategies:
+            for mode, cut_mode, fmt in strategies:
                 if os.path.exists(raw):
                     try:
                         os.remove(raw)
@@ -411,18 +411,21 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
                     "--ffmpeg-location", ffmpeg_exe, "-f", fmt,
                     "--merge-output-format", "mp4", "-o", raw,
                 ]
-                if use_sections:
+                if cut_mode == "sections":
                     cmd += ["--download-sections", f"*{s:.0f}-{e:.0f}", "--force-keyframes-at-cuts"]
                 else:
-                    cmd += ["--max-filesize", "65M"]
+                    cmd += [
+                        "--downloader", "ffmpeg",
+                        "--downloader-args", f"ffmpeg_i:-ss {s:.2f} -to {e:.2f}",
+                    ]
                 cmd.append(f"https://www.youtube.com/watch?v={vid}")
                 r_dl = _run(cmd, timeout=110)
                 if os.path.exists(raw) and os.path.getsize(raw) > 50_000:
-                    trimmed_in_raw = use_sections
+                    trimmed_in_raw = True
                     break
                 if r_dl and r_dl.stderr:
                     err_line = r_dl.stderr.strip().splitlines()[-1][:140]
-                    errs.append(f"{mode}/{use_sections}:{err_line}")
+                    errs.append(f"{mode}/{cut_mode}:{err_line}")
                     last_err = " | ".join(errs[-2:])
             if not (os.path.exists(raw) and os.path.getsize(raw) > 50_000):
                 print(f"[PESQUISA V5 DL] Falha em {m['mid']} ({vid}): {last_err}", flush=True)
@@ -483,22 +486,41 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
     return validados
 
 
-def pesquisar_do_zero(ffmpeg_exe):
-    """Executa o ciclo completo de pesquisa V5 e retorna (pauta, momentos_validados)."""
-    cands = descobrir_conteudo(ffmpeg_exe=ffmpeg_exe)
-    transcritos = baixar_transcricoes(cands)
-    lives_cap = capturar_lives(cands, ffmpeg_exe)
-    if not transcritos and not lives_cap:
-        raise RuntimeError("Pesquisa V5 sem material real (nenhuma transcrição/live). Abortando para não inventar conteúdo.")
-    pauta = escolher_pauta(transcritos, lives_cap)
-    by_id = {c["id"]: c for c in cands}
-    momentos = [m for m in pauta.get("momentos", []) if m.get("video_id") in by_id]
-    momentos = sorted(momentos, key=lambda m: -int(m.get("potencial", 0) or 0))
-    validados = baixar_e_validar_momentos(momentos, by_id, ffmpeg_exe)
+def pesquisar_do_zero(ffmpeg_exe, min_valid=1):
+    """Executa o ciclo completo de pesquisa V8 (multi-rodada se necessário para atingir min_valid clipes NOVOS únicos!)."""
+    all_validados = []
+    seen_vids = set()
+    pauta_final = {}
+
+    for round_idx in range(1, 4):
+        cands = descobrir_conteudo(n_queries=18, por_query=14, ffmpeg_exe=ffmpeg_exe)
+        cands = [c for c in cands if c["id"] not in seen_vids]
+        transcritos = baixar_transcricoes(cands, max_videos=16)
+        lives_cap = capturar_lives(cands, ffmpeg_exe) if round_idx == 1 else []
+        if not transcritos and not lives_cap:
+            if all_validados:
+                break
+            raise RuntimeError("Pesquisa V8 sem material real (nenhuma transcrição/live). Abortando para não inventar conteúdo.")
+        pauta = escolher_pauta(transcritos, lives_cap)
+        if not pauta_final:
+            pauta_final = pauta
+        by_id = {c["id"]: c for c in cands}
+        momentos = [m for m in pauta.get("momentos", []) if m.get("video_id") in by_id]
+        momentos = sorted(momentos, key=lambda m: -int(m.get("potencial", 0) or 0))
+        for idx_m, m in enumerate(momentos):
+            m["mid"] = f"r{round_idx}_m{idx_m + 1}"
+        validados = baixar_e_validar_momentos(momentos, by_id, ffmpeg_exe)
+        for v in validados:
+            all_validados.append(v)
+            seen_vids.add(v.get("video_id"))
+        print(f"[PESQUISA V8 RODADA {round_idx}] Clipes novos validados acumulados: {len(all_validados)} (meta={min_valid})", flush=True)
+        if len(all_validados) >= min_valid:
+            break
+
     with open(os.path.join(RESEARCH_DIR, "pauta.json"), "w", encoding="utf-8") as f:
-        json.dump({"pauta": pauta, "validados": validados}, f, ensure_ascii=False, indent=2)
+        json.dump({"pauta": pauta_final, "validados": all_validados}, f, ensure_ascii=False, indent=2)
     _save_v5_history(
-        [m.get("video_id") for m in validados],
-        topic=(pauta.get("pauta_longo") or {}).get("tema"),
+        [m.get("video_id") for m in all_validados],
+        topic=(pauta_final.get("pauta_longo") or {}).get("tema"),
     )
-    return pauta, validados
+    return pauta_final, all_validados
