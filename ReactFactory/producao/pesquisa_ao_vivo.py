@@ -562,7 +562,7 @@ def pesquisar_clipes_twitch(ffmpeg_exe, min_valid=1):
                     continue
                 if NSFW_RE.search(title):
                     continue
-                if per_streamer.get(ch, 0) >= 2:
+                if per_streamer.get(ch, 0) >= (3 if min_valid >= 6 else 2):
                     continue
                 seen_slugs.add(slug)
                 per_streamer[ch] = per_streamer.get(ch, 0) + 1
@@ -593,105 +593,136 @@ def pesquisar_clipes_twitch(ffmpeg_exe, min_valid=1):
     if not ordered:
         return {}, []
 
-    # Baixa em lotes até atingir min_valid clipes aprovados na validação visual 5-frames!
+    # Baixa e valida em lotes progressivos até atingir a meta de clipes reais de GTA 6 aprovados!
     validados = []
-    batch_size = max(8, min(28, min_valid + 10))
-    to_try = ordered[:batch_size]
+    target_valid = max(min_valid + 2, 4 if min_valid == 1 else min_valid + 2)
+    max_candidates = min(len(ordered), max(16, min_valid * 4))
+    batch_len = 8 if min_valid <= 2 else 14
 
     def _dl_tw(idx_c):
         idx, c = idx_c
         mid = f"tw_m{idx + 1}"
         dst = os.path.join(clips_dir, f"{mid}_{c['slug'][:18]}.mp4")
         raw = dst + ".raw.mp4"
-        if os.path.exists(raw):
+        try:
+            if os.path.exists(raw):
+                try:
+                    os.remove(raw)
+                except OSError:
+                    pass
+            r_dl = _run([
+                sys.executable, "-m", "yt_dlp", "--no-warnings", "--quiet",
+                "-f", "best[height<=720][ext=mp4]/best[height<=720]/best",
+                "-o", raw, c["url"],
+            ], timeout=45)
+            if not (os.path.exists(raw) and os.path.getsize(raw) > 100_000):
+                err_l = (r_dl.stderr.strip().splitlines()[-1][:120] if (r_dl and r_dl.stderr) else "timeout")
+                print(f"[TWITCH DL] Falha em {c['canal']} ({c['slug'][:16]}): {err_l}", flush=True)
+                return None
+
+            dur_cut = min(24.0, float(c["duration"]))
+            # V9.2: Stream copy instantâneo (0.2s, zero CPU na nuvem!) — preserva 100% do HD + áudio original da Twitch!
+            r_cp = subprocess.run([
+                ffmpeg_exe, "-y", "-i", raw, "-t", f"{dur_cut:.2f}",
+                "-c", "copy", "-movflags", "+faststart", dst,
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=25)
+
+            if r_cp.returncode != 0 or not (os.path.exists(dst) and os.path.getsize(dst) > 150_000):
+                # Fallback rápido ultrafast (caso o container original precise remux/transcode)
+                subprocess.run([
+                    ffmpeg_exe, "-y", "-i", raw, "-t", f"{dur_cut:.2f}",
+                    "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "21", "-threads", "2",
+                    "-c:a", "aac", "-ar", "48000", "-ac", "2", dst,
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=90)
+
             try:
                 os.remove(raw)
             except OSError:
                 pass
-        r_dl = _run([
-            sys.executable, "-m", "yt_dlp", "--no-warnings", "--quiet",
-            "-f", "best[height<=720]/best",
-            "-o", raw, c["url"],
-        ], timeout=45)
-        if not (os.path.exists(raw) and os.path.getsize(raw) > 100_000):
-            err_l = (r_dl.stderr.strip().splitlines()[-1][:120] if (r_dl and r_dl.stderr) else "timeout")
-            print(f"[TWITCH DL] Falha em {c['canal']} ({c['slug'][:16]}): {err_l}", flush=True)
-            return None
-        # Normaliza para 1920x1080 24fps H.264 + AAC 48kHz preservando áudio original (máx 24s)
-        dur_cut = min(24.0, float(c["duration"]))
-        subprocess.run([
-            ffmpeg_exe, "-y", "-i", raw, "-t", f"{dur_cut:.2f}",
-            "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "19",
-            "-c:a", "aac", "-ar", "48000", "-ac", "2", dst,
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=60)
-        try:
-            os.remove(raw)
-        except OSError:
-            pass
-        if not (os.path.exists(dst) and os.path.getsize(dst) > 150_000):
-            return None
-        return {
-            "mid": mid,
-            "video_id": c["slug"],
-            "canal": c["canal"],
-            "o_que_acontece": f"Clipe viral da live de {c['canal']} no GTA 6: {c['title']}",
-            "assunto": "gameplay",
-            "potencial": 9 if c["views"] >= 5000 else 7,
-            "clip": dst,
-            "views": c["views"],
-            "url": c["url"],
-        }
-
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        baixados = [m for m in pool.map(_dl_tw, enumerate(to_try)) if m]
-
-    print(f"[TWITCH V9] Baixados com sucesso: {len(baixados)}/{len(to_try)} clipes HD com áudio original!", flush=True)
-
-    for m in baixados:
-        if len(validados) >= max(min_valid + 3, 4 if min_valid == 1 else min_valid + 2):
-            break
-        frames = _frames_b64(m["clip"], n=5)
-        parts = [{"inline_data": {"mime_type": "image/jpeg", "data": b}} for b in frames]
-        prompt = (
-            f"Estas são 5 imagens em ordem (início, meio e fim) de um clipe viral da Twitch de GTA 6 do streamer '{m['canal']}' (título: '{m['o_que_acontece']}').\n"
-            "Responda APENAS um objeto JSON:\n"
-            "{\"e_gameplay\": true/false (true SOMENTE se TODAS as 5 imagens mostrarem gameplay real de GTA 6, false se for só webcam/chat/menu/outro jogo/tela preta), "
-            "\"seguro_monetizacao\": true/false (false se houver nudez, strip club, conteúdo +18 ou violência gráfica explícita que desmonetize no YouTube), "
-            "\"tem_logo_ou_trailer\": true/false (true se for trailer oficial ou tela de logo estática), "
-            "\"tem_overlay_poluido\": true/false (true APENAS se houver QR code gigante, banner cobrindo a tela ou webcam em tela cheia; uma facecam pequena no canto durante gameplay real NÃO é poluído), "
-            "\"assunto\": \"bug|segredo|detalhe|mecanica|engracado|acao|mapa\", "
-            "\"descricao_real\": \"descreva objetivamente em 1 frase em PT-BR o que REALMENTE acontece no jogo GTA 6 neste clipe\", "
-            "\"nota_visual\": 1-10 (impacto/curiosidade/entretenimento da cena), "
-            "\"frase_thumb\": \"2 a 4 palavras de impacto sobre a cena\", "
-            "\"regiao\": \"vice_city|leonida_keys|grassrivers|port_gellhorn|ambrosia|mount_kalaga|nenhuma\"}"
-        )
-        try:
-            v, _ = gemini_text(prompt, json_mode=True, temperature=0.2, parts_extra=parts)
-            if isinstance(v, list):
-                v = v[0] if (v and isinstance(v[0], dict)) else {}
+            if not (os.path.exists(dst) and os.path.getsize(dst) > 150_000):
+                return None
+            return {
+                "mid": mid,
+                "video_id": c["slug"],
+                "canal": c["canal"],
+                "o_que_acontece": f"Clipe viral da live de {c['canal']} no GTA 6: {c['title']}",
+                "assunto": "gameplay",
+                "potencial": 9 if c["views"] >= 5000 else 7,
+                "clip": dst,
+                "views": c["views"],
+                "url": c["url"],
+            }
         except Exception as err:
-            print(f"[TWITCH VALIDAÇÃO] {m['mid']} erro {err}", flush=True)
-            continue
-        m.update({
-            "validacao": v,
-            "descricao_real": v.get("descricao_real") or m["o_que_acontece"],
-            "assunto": v.get("assunto") or "gameplay",
-        })
-        m["o_que_acontece"] = m["descricao_real"]
-        ok_game = bool(v.get("e_gameplay"))
-        ok_safe = bool(v.get("seguro_monetizacao", True))
-        has_logo = bool(v.get("tem_logo_ou_trailer"))
-        has_clutter = bool(v.get("tem_overlay_poluido"))
-        nota = int(v.get("nota_visual", 0) or 0)
-        aprovado = ok_game and ok_safe and (not has_logo) and (not has_clutter) and nota >= 6
+            print(f"[TWITCH DL] Erro/timeout isolado em {c['canal']} ({c['slug'][:16]}): {str(err)[:120]}", flush=True)
+            for p_tmp in (raw, dst):
+                try:
+                    if os.path.exists(p_tmp):
+                        os.remove(p_tmp)
+                except OSError:
+                    pass
+            return None
+
+    for start_idx in range(0, max_candidates, batch_len):
+        if len(validados) >= target_valid:
+            break
+        batch = ordered[start_idx:start_idx + batch_len]
+        if not batch:
+            break
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            baixados = [m for m in pool.map(_dl_tw, [(start_idx + i, c) for i, c in enumerate(batch)]) if m]
+
         print(
-            f"[TWITCH VALIDAÇÃO] {m['mid']} ({m['canal']}) game={ok_game} safe={ok_safe} logo={has_logo} "
-            f"clutter={has_clutter} nota={nota} -> {'OK' if aprovado else 'DESCARTADO'} | {m['descricao_real']}",
+            f"[TWITCH V9.2] Lote {start_idx // batch_len + 1}: baixados {len(baixados)}/{len(batch)} clipes HD com áudio original!",
             flush=True,
         )
-        if aprovado:
-            validados.append(m)
+
+        for m in baixados:
+            if len(validados) >= target_valid:
+                break
+            frames = _frames_b64(m["clip"], n=5)
+            if not frames:
+                continue
+            parts = [{"inline_data": {"mime_type": "image/jpeg", "data": b}} for b in frames]
+            prompt = (
+                f"Estas são 5 imagens em ordem (início, meio e fim) de um clipe viral da Twitch de GTA 6 do streamer '{m['canal']}' (título: '{m['o_que_acontece']}').\n"
+                "Responda APENAS um objeto JSON:\n"
+                "{\"e_gameplay\": true/false (true SOMENTE se TODAS as 5 imagens mostrarem gameplay real de GTA 6, false se for só webcam/chat/menu/outro jogo/tela preta), "
+                "\"seguro_monetizacao\": true/false (false se houver nudez, strip club, conteúdo +18 ou violência gráfica explícita que desmonetize no YouTube), "
+                "\"tem_logo_ou_trailer\": true/false (true se for trailer oficial ou tela de logo estática), "
+                "\"tem_overlay_poluido\": true/false (true APENAS se houver QR code gigante, banner cobrindo a tela ou webcam em tela cheia; uma facecam pequena no canto durante gameplay real NÃO é poluído), "
+                "\"assunto\": \"bug|segredo|detalhe|mecanica|engracado|acao|mapa\", "
+                "\"descricao_real\": \"descreva objetivamente em 1 frase em PT-BR o que REALMENTE acontece no jogo GTA 6 neste clipe\", "
+                "\"nota_visual\": 1-10 (impacto/curiosidade/entretenimento da cena), "
+                "\"frase_thumb\": \"2 a 4 palavras de impacto sobre a cena\", "
+                "\"regiao\": \"vice_city|leonida_keys|grassrivers|port_gellhorn|ambrosia|mount_kalaga|nenhuma\"}"
+            )
+            try:
+                v, _ = gemini_text(prompt, json_mode=True, temperature=0.2, parts_extra=parts)
+                if isinstance(v, list):
+                    v = v[0] if (v and isinstance(v[0], dict)) else {}
+            except Exception as err:
+                print(f"[TWITCH VALIDAÇÃO] {m['mid']} erro {err}", flush=True)
+                continue
+            m.update({
+                "validacao": v,
+                "descricao_real": v.get("descricao_real") or m["o_que_acontece"],
+                "assunto": v.get("assunto") or "gameplay",
+            })
+            m["o_que_acontece"] = m["descricao_real"]
+            ok_game = bool(v.get("e_gameplay"))
+            ok_safe = bool(v.get("seguro_monetizacao", True))
+            has_logo = bool(v.get("tem_logo_ou_trailer"))
+            has_clutter = bool(v.get("tem_overlay_poluido"))
+            nota = int(v.get("nota_visual", 0) or 0)
+            aprovado = ok_game and ok_safe and (not has_logo) and (not has_clutter) and nota >= 6
+            print(
+                f"[TWITCH VALIDAÇÃO] {m['mid']} ({m['canal']}) game={ok_game} safe={ok_safe} logo={has_logo} "
+                f"clutter={has_clutter} nota={nota} -> {'OK' if aprovado else 'DESCARTADO'} | {m['descricao_real']}",
+                flush=True,
+            )
+            if aprovado:
+                validados.append(m)
 
     pauta = {
         "momentos": validados,
