@@ -180,14 +180,21 @@ def _call_gemini_tts(text, raw_wav_path, gemini_key, persona_prompt=UNIFIED_VOIC
 def _call_edge_tts(text, raw_mp3_path, rate="+6%"):
     import edge_tts
 
-    clean_t = normalize_ptbr_phonetics(text)
+    clean_t = normalize_ptbr_phonetics(text).strip() or "Confira esse detalhe no GTA meia."
+    last_err = None
+    for attempt in range(4):
+        try:
+            async def _run_edge():
+                comm = edge_tts.Communicate(clean_t, "pt-BR-AntonioNeural", rate=rate, pitch="+0Hz")
+                await comm.save(raw_mp3_path)
 
-    async def _run_edge():
-        comm = edge_tts.Communicate(clean_t, "pt-BR-AntonioNeural", rate=rate, pitch="+0Hz")
-        await comm.save(raw_mp3_path)
-
-    asyncio.run(_run_edge())
-    return raw_mp3_path
+            asyncio.run(_run_edge())
+            if os.path.exists(raw_mp3_path) and os.path.getsize(raw_mp3_path) > 1000:
+                return raw_mp3_path
+        except Exception as err:
+            last_err = err
+            time.sleep(1.5 * (attempt + 1))
+    raise RuntimeError(f"Edge-TTS falhou após 4 tentativas: {last_err}")
 
 
 def generate_realistic_voice(text, output_wav_path, style_hint=None):
