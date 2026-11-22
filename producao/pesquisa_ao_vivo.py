@@ -487,36 +487,276 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
     return validados
 
 
+NSFW_RE = re.compile(
+    r"strip|stripper|private\s*dance|nud[eo]|boob|sex|nsfw|horny|gyatt|twerk|prostit|shoe\s*store|"
+    r"porno|pelad[ao]|bunda|peito|safad|boate\s*adult|lap\s*dance|naked|bikini\s*mod",
+    re.I,
+)
+
+
+def pesquisar_clipes_twitch(ffmpeg_exe, min_valid=1):
+    """
+    MOTOR CLOUD-NATIVE V9 (100% GRÁTIS, 100% NUVEM 24h NO GITHUB ACTIONS — ZERO BLOQUEIO AZURE / ZERO COOKIES!):
+    - Consulta a API pública GraphQL da Twitch para a categoria 'Grand Theft Auto VI' (PT-BR + EN, últimas 24h e 7 dias).
+    - Filtra NSFW/strip club por título + valida 5 frames no Gemini Vision (gameplay real, monetização segura, sem overlay poluído).
+    - Baixa clipes virais já cortados pela comunidade no clímax exato (14-60s) com áudio original direto da CDN da Twitch!
+    """
+    import requests
+
+    os.makedirs(RESEARCH_DIR, exist_ok=True)
+    clips_dir = os.path.join(RESEARCH_DIR, "clips")
+    os.makedirs(clips_dir, exist_ok=True)
+
+    hist = _load_v5_history()
+    used_ids = set(hist.get("used_video_ids") or [])
+
+    hdr = {"Client-ID": "kimne78kx3ncx6brgo4mv6wki5h1ko", "Content-Type": "application/json"}
+    gql = """
+    query($name: String!, $first: Int!, $period: ClipsPeriod!, $langs: [Language!]) {
+      game(name: $name) {
+        clips(first: $first, criteria: { period: $period, languages: $langs }) {
+          edges {
+            node {
+              slug
+              title
+              url
+              viewCount
+              durationSeconds
+              language
+              broadcaster { displayName }
+            }
+          }
+        }
+      }
+    }
+    """
+
+    candidates = []
+    seen_slugs = set()
+    per_streamer = {}
+
+    queries = [
+        ("LAST_DAY", ["PT"], 35),
+        ("LAST_DAY", ["EN"], 35),
+        ("LAST_WEEK", ["PT"], 40),
+        ("LAST_WEEK", ["EN"], 40),
+    ]
+    for period, langs, limit in queries:
+        try:
+            r = requests.post(
+                "https://gql.twitch.tv/gql",
+                headers=hdr,
+                json={"query": gql, "variables": {"name": "Grand Theft Auto VI", "first": limit, "period": period, "langs": langs}},
+                timeout=18,
+            )
+            edges = ((r.json().get("data") or {}).get("game") or {}).get("clips", {}).get("edges", [])
+            for e in edges:
+                n = e.get("node") or {}
+                slug = n.get("slug") or ""
+                title = (n.get("title") or "").strip()
+                dur = int(n.get("durationSeconds") or 0)
+                ch = ((n.get("broadcaster") or {}).get("displayName") or "Streamer").strip()
+                if not slug or slug in seen_slugs or slug in used_ids:
+                    continue
+                if dur < 14 or dur > 65:
+                    continue
+                if NSFW_RE.search(title):
+                    continue
+                if per_streamer.get(ch, 0) >= 2:
+                    continue
+                seen_slugs.add(slug)
+                per_streamer[ch] = per_streamer.get(ch, 0) + 1
+                candidates.append({
+                    "slug": slug,
+                    "video_id": f"tw_{slug[:24]}",
+                    "title": title,
+                    "url": n.get("url") or f"https://clips.twitch.tv/{slug}",
+                    "views": int(n.get("viewCount") or 0),
+                    "duration": dur,
+                    "lang": n.get("language") or langs[0],
+                    "canal": ch,
+                    "period": period,
+                })
+        except Exception as err:
+            print(f"[TWITCH V9] Aviso busca {period}/{langs}: {err}", flush=True)
+
+    # Prioriza PT-BR de hoje + virais globais de hoje com leve aleatoriedade para variedade
+    pt_day = [c for c in candidates if c["lang"] == "PT" and c["period"] == "LAST_DAY"]
+    en_day = [c for c in candidates if c["lang"] == "EN" and c["period"] == "LAST_DAY"]
+    others = [c for c in candidates if c not in pt_day and c not in en_day]
+    random.shuffle(pt_day)
+    random.shuffle(en_day)
+    random.shuffle(others)
+    ordered = pt_day + en_day + others
+    print(f"[TWITCH V9] {len(ordered)} clipes novos candidatos ({len(pt_day)} PT 24h, {len(en_day)} EN 24h) | zero cookies!", flush=True)
+
+    if not ordered:
+        return {}, []
+
+    # Baixa em lotes até atingir min_valid clipes aprovados na validação visual 5-frames!
+    validados = []
+    batch_size = max(8, min(28, min_valid + 10))
+    to_try = ordered[:batch_size]
+
+    def _dl_tw(idx_c):
+        idx, c = idx_c
+        mid = f"tw_m{idx + 1}"
+        dst = os.path.join(clips_dir, f"{mid}_{c['slug'][:18]}.mp4")
+        raw = dst + ".raw.mp4"
+        if os.path.exists(raw):
+            try:
+                os.remove(raw)
+            except OSError:
+                pass
+        r_dl = _run([
+            sys.executable, "-m", "yt_dlp", "--no-warnings", "--quiet",
+            "-f", "best[height<=720]/best",
+            "-o", raw, c["url"],
+        ], timeout=45)
+        if not (os.path.exists(raw) and os.path.getsize(raw) > 100_000):
+            err_l = (r_dl.stderr.strip().splitlines()[-1][:120] if (r_dl and r_dl.stderr) else "timeout")
+            print(f"[TWITCH DL] Falha em {c['canal']} ({c['slug'][:16]}): {err_l}", flush=True)
+            return None
+        # Normaliza para 1920x1080 24fps H.264 + AAC 48kHz preservando áudio original (máx 24s)
+        dur_cut = min(24.0, float(c["duration"]))
+        subprocess.run([
+            ffmpeg_exe, "-y", "-i", raw, "-t", f"{dur_cut:.2f}",
+            "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+            "-c:a", "aac", "-ar", "48000", "-ac", "2", dst,
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        try:
+            os.remove(raw)
+        except OSError:
+            pass
+        if not (os.path.exists(dst) and os.path.getsize(dst) > 150_000):
+            return None
+        return {
+            "mid": mid,
+            "video_id": c["slug"],
+            "canal": c["canal"],
+            "o_que_acontece": f"Clipe viral da live de {c['canal']} no GTA 6: {c['title']}",
+            "assunto": "gameplay",
+            "potencial": 9 if c["views"] >= 5000 else 7,
+            "clip": dst,
+            "views": c["views"],
+            "url": c["url"],
+        }
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        baixados = [m for m in pool.map(_dl_tw, enumerate(to_try)) if m]
+
+    print(f"[TWITCH V9] Baixados com sucesso: {len(baixados)}/{len(to_try)} clipes HD com áudio original!", flush=True)
+
+    for m in baixados:
+        if len(validados) >= max(min_valid + 3, 4 if min_valid == 1 else min_valid + 2):
+            break
+        frames = _frames_b64(m["clip"], n=5)
+        parts = [{"inline_data": {"mime_type": "image/jpeg", "data": b}} for b in frames]
+        prompt = (
+            f"Estas são 5 imagens em ordem (início, meio e fim) de um clipe viral da Twitch de GTA 6 do streamer '{m['canal']}' (título: '{m['o_que_acontece']}').\n"
+            "Responda APENAS um objeto JSON:\n"
+            "{\"e_gameplay\": true/false (true SOMENTE se TODAS as 5 imagens mostrarem gameplay real de GTA 6, false se for só webcam/chat/menu/outro jogo/tela preta), "
+            "\"seguro_monetizacao\": true/false (false se houver nudez, strip club, conteúdo +18 ou violência gráfica explícita que desmonetize no YouTube), "
+            "\"tem_logo_ou_trailer\": true/false (true se for trailer oficial ou tela de logo estática), "
+            "\"tem_overlay_poluido\": true/false (true APENAS se houver QR code gigante, banner cobrindo a tela ou webcam em tela cheia; uma facecam pequena no canto durante gameplay real NÃO é poluído), "
+            "\"assunto\": \"bug|segredo|detalhe|mecanica|engracado|acao|mapa\", "
+            "\"descricao_real\": \"descreva objetivamente em 1 frase em PT-BR o que REALMENTE acontece no jogo GTA 6 neste clipe\", "
+            "\"nota_visual\": 1-10 (impacto/curiosidade/entretenimento da cena), "
+            "\"frase_thumb\": \"2 a 4 palavras de impacto sobre a cena\", "
+            "\"regiao\": \"vice_city|leonida_keys|grassrivers|port_gellhorn|ambrosia|mount_kalaga|nenhuma\"}"
+        )
+        try:
+            v, _ = gemini_text(prompt, json_mode=True, temperature=0.2, parts_extra=parts)
+            if isinstance(v, list):
+                v = v[0] if (v and isinstance(v[0], dict)) else {}
+        except Exception as err:
+            print(f"[TWITCH VALIDAÇÃO] {m['mid']} erro {err}", flush=True)
+            continue
+        m.update({
+            "validacao": v,
+            "descricao_real": v.get("descricao_real") or m["o_que_acontece"],
+            "assunto": v.get("assunto") or "gameplay",
+        })
+        m["o_que_acontece"] = m["descricao_real"]
+        ok_game = bool(v.get("e_gameplay"))
+        ok_safe = bool(v.get("seguro_monetizacao", True))
+        has_logo = bool(v.get("tem_logo_ou_trailer"))
+        has_clutter = bool(v.get("tem_overlay_poluido"))
+        nota = int(v.get("nota_visual", 0) or 0)
+        aprovado = ok_game and ok_safe and (not has_logo) and (not has_clutter) and nota >= 6
+        print(
+            f"[TWITCH VALIDAÇÃO] {m['mid']} ({m['canal']}) game={ok_game} safe={ok_safe} logo={has_logo} "
+            f"clutter={has_clutter} nota={nota} -> {'OK' if aprovado else 'DESCARTADO'} | {m['descricao_real']}",
+            flush=True,
+        )
+        if aprovado:
+            validados.append(m)
+
+    pauta = {
+        "momentos": validados,
+        "pauta_longo": {
+            "tema": "Os Melhores Bugs, Segredos e Momentos Insanos de GTA 6 nas Lives de Hoje",
+            "angulo": "Compilado editorial narrado das descobertas mais recentes de gameplay do GTA 6",
+        },
+        "pauta_short": {
+            "tema": validados[0]["descricao_real"] if validados else "Momento insano no GTA 6",
+            "formato": "descoberta",
+        },
+    }
+    return pauta, validados
+
+
 def pesquisar_do_zero(ffmpeg_exe, min_valid=1):
-    """Executa o ciclo completo de pesquisa V8 (multi-rodada se necessário para atingir min_valid clipes NOVOS únicos!)."""
+    """
+    Executa o ciclo completo de pesquisa V9 (Cloud-Native 24/7 + Residencial):
+    - Na nuvem do GitHub Actions (sem YTDLP_PROXY), usa TWITCH CLIPS ('Grand Theft Auto VI' PT + EN) como motor primário:
+      100% grátis, zero bloqueio de IP da Azure, zero cookies, clipes virais novos todo dia!
+    - No PC residencial (ou com YTDLP_PROXY), tenta YouTube e complementa automaticamente com Twitch Clips se precisar!
+    """
+    is_cloud_no_proxy = (os.environ.get("GITHUB_ACTIONS") == "true") and not (os.environ.get("YTDLP_PROXY") or "").strip()
+
     all_validados = []
     seen_vids = set()
     pauta_final = {}
 
-    for round_idx in range(1, 4):
-        cands = descobrir_conteudo(n_queries=18, por_query=14, ffmpeg_exe=ffmpeg_exe)
-        cands = [c for c in cands if c["id"] not in seen_vids]
-        transcritos = baixar_transcricoes(cands, max_videos=16)
-        lives_cap = capturar_lives(cands, ffmpeg_exe) if round_idx == 1 else []
-        if not transcritos and not lives_cap:
-            if all_validados:
+    if is_cloud_no_proxy:
+        print("[PESQUISA V9 CLOUD] Ambiente GitHub Actions detectado -> usando Twitch Clips GTA 6 (zero bloqueio Azure / zero cookies)!", flush=True)
+        pauta_tw, vals_tw = pesquisar_clipes_twitch(ffmpeg_exe, min_valid=min_valid)
+        pauta_final = pauta_tw
+        all_validados.extend(vals_tw)
+    else:
+        for round_idx in range(1, 3):
+            cands = descobrir_conteudo(n_queries=18, por_query=14, ffmpeg_exe=ffmpeg_exe)
+            cands = [c for c in cands if c["id"] not in seen_vids]
+            transcritos = baixar_transcricoes(cands, max_videos=16)
+            lives_cap = capturar_lives(cands, ffmpeg_exe) if round_idx == 1 else []
+            if not transcritos and not lives_cap:
                 break
-            raise RuntimeError("Pesquisa V8 sem material real (nenhuma transcrição/live). Abortando para não inventar conteúdo.")
-        pauta = escolher_pauta(transcritos, lives_cap)
-        if not pauta_final:
-            pauta_final = pauta
-        by_id = {c["id"]: c for c in cands}
-        momentos = [m for m in pauta.get("momentos", []) if m.get("video_id") in by_id]
-        momentos = sorted(momentos, key=lambda m: -int(m.get("potencial", 0) or 0))
-        for idx_m, m in enumerate(momentos):
-            m["mid"] = f"r{round_idx}_m{idx_m + 1}"
-        validados = baixar_e_validar_momentos(momentos, by_id, ffmpeg_exe)
-        for v in validados:
-            all_validados.append(v)
-            seen_vids.add(v.get("video_id"))
-        print(f"[PESQUISA V8 RODADA {round_idx}] Clipes novos validados acumulados: {len(all_validados)} (meta={min_valid})", flush=True)
-        if len(all_validados) >= min_valid:
-            break
+            pauta = escolher_pauta(transcritos, lives_cap)
+            if not pauta_final:
+                pauta_final = pauta
+            by_id = {c["id"]: c for c in cands}
+            momentos = [m for m in pauta.get("momentos", []) if m.get("video_id") in by_id]
+            momentos = sorted(momentos, key=lambda m: -int(m.get("potencial", 0) or 0))
+            for idx_m, m in enumerate(momentos):
+                m["mid"] = f"r{round_idx}_m{idx_m + 1}"
+            validados = baixar_e_validar_momentos(momentos, by_id, ffmpeg_exe)
+            for v in validados:
+                all_validados.append(v)
+                seen_vids.add(v.get("video_id"))
+            print(f"[PESQUISA V9 YT RODADA {round_idx}] Clipes novos validados acumulados: {len(all_validados)} (meta={min_valid})", flush=True)
+            if len(all_validados) >= min_valid:
+                break
+
+        # Se ainda faltarem clipes para atingir min_valid, complementa instantaneamente com Twitch Clips GTA 6!
+        if len(all_validados) < min_valid:
+            faltam = max(1, min_valid - len(all_validados))
+            print(f"[PESQUISA V9] Complementando {faltam} clipe(s) novo(s) via Twitch Clips GTA 6...", flush=True)
+            pauta_tw, vals_tw = pesquisar_clipes_twitch(ffmpeg_exe, min_valid=faltam)
+            if not pauta_final:
+                pauta_final = pauta_tw
+            all_validados.extend(vals_tw)
 
     with open(os.path.join(RESEARCH_DIR, "pauta.json"), "w", encoding="utf-8") as f:
         json.dump({"pauta": pauta_final, "validados": all_validados}, f, ensure_ascii=False, indent=2)
