@@ -6,6 +6,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 GTA6_FILE = os.path.join(DATA_DIR, "history_gta6.json")
 POSTED_FILE = os.path.join(DATA_DIR, "history_posted.json")
+V5_FILE = os.path.join(DATA_DIR, "history_v5.json")
 
 
 def _load_json(path, default):
@@ -61,6 +62,7 @@ def main():
 
     bak_gta6 = _load_json(GTA6_FILE, {}) if os.path.exists(GTA6_FILE) else None
     bak_posted = _load_json(POSTED_FILE, {}) if os.path.exists(POSTED_FILE) else None
+    bak_v5 = _load_json(V5_FILE, {}) if os.path.exists(V5_FILE) else None
 
     for attempt in range(4):
         subprocess.run(["git", "checkout", "--", "ReactFactory/data"], check=False)
@@ -77,6 +79,14 @@ def main():
             remote_p = _load_json(POSTED_FILE, {})
             with open(POSTED_FILE, "w", encoding="utf-8") as f:
                 json.dump(_merge_posted(remote_p, bak_posted), f, indent=2, ensure_ascii=False)
+        if bak_v5:
+            remote_v5 = _load_json(V5_FILE, {"used_video_ids": [], "used_topics": []})
+            merged_v5 = {
+                "used_video_ids": list(dict.fromkeys((remote_v5.get("used_video_ids") or []) + (bak_v5.get("used_video_ids") or [])))[-600:],
+                "used_topics": list(dict.fromkeys((remote_v5.get("used_topics") or []) + (bak_v5.get("used_topics") or [])))[-120:],
+            }
+            with open(V5_FILE, "w", encoding="utf-8") as f:
+                json.dump(merged_v5, f, indent=2, ensure_ascii=False)
 
         subprocess.run(["git", "add", "ReactFactory/data/history*.json"], check=False)
         if subprocess.run(["git", "diff", "--staged", "--quiet"]).returncode == 0:
