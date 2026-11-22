@@ -24,10 +24,24 @@ os.makedirs(ASSETS_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 
-def run_pipeline(do_upload=False):
+def run_pipeline(do_upload=False, max_qc_attempts=2):
+    import shutil
+
+    for qc_attempt in range(1, max_qc_attempts + 1):
+        try:
+            return _run_pipeline_once(do_upload=do_upload, qc_attempt=qc_attempt)
+        except Exception as err:
+            print(f"[PIPELINE SHORT V8] Tentativa {qc_attempt}/{max_qc_attempts} reprovada/falhou: {err}", flush=True)
+            shutil.rmtree(TEMP_DIR, ignore_errors=True)
+            os.makedirs(TEMP_DIR, exist_ok=True)
+            if qc_attempt >= max_qc_attempts:
+                raise
+
+
+def _run_pipeline_once(do_upload=False, qc_attempt=1):
     theme = os.environ.get("CHANNEL_THEME", "gta6").strip().lower()
     print("====================================================")
-    print(f"   INICIANDO ESTEIRA PRO SHORTS ({theme.upper()} + LATENTSYNC)")
+    print(f"   INICIANDO ESTEIRA PRO SHORTS V8 ({theme.upper()} | TENTATIVA {qc_attempt})")
     print("====================================================")
 
     sfx_whoosh, sfx_freeze = ensure_sfx()
