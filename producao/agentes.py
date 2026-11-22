@@ -279,7 +279,23 @@ Retorne APENAS JSON válido no formato:
     }}
   ]
 }}"""
-        data, model_used = gemini_text(prompt, json_mode=True, temperature=0.72)
+        data = None
+        model_used = "gemini-2.5-flash"
+        for attempt_sc in (1, 2):
+            m_order = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite"] if attempt_sc == 1 else ["gemini-3.1-flash-lite", "gemini-2.5-flash"]
+            cand_data, model_used = gemini_text(
+                prompt + f"\n\nOBRIGATÓRIO: O array 'acts' DEVE conter TODOS os {num_acts} Atos (act_num 1 até {num_acts}), cada um com {blocks_per_act} blocos (total = {num_acts * blocks_per_act} blocos)! PROIBIDO retornar apenas 1 Ato!",
+                models=m_order,
+                json_mode=True,
+                temperature=0.72,
+            )
+            tot_b = sum(len(a.get("blocks") or []) for a in (cand_data.get("acts") or []))
+            if tot_b >= (num_acts * blocks_per_act) - 6:
+                data = cand_data
+                break
+            print(f"[AGENTE 2] Aviso: modelo {model_used} retornou apenas {tot_b} blocos (esperado {num_acts * blocks_per_act}) -> retentando...", flush=True)
+        if not data:
+            raise RuntimeError(f"Roteiro longo retornou poucos blocos ({tot_b} < {num_acts * blocks_per_act})")
         data["model_used"] = model_used
         data = AgenteAuditorViral.auditar_e_otimizar_viralizacao(data, formato="long")
         data["acts"] = AgenteDiretorCriativo.enriquecer_storyboard(data.get("acts", []), formato="long", research_data=research_data)
