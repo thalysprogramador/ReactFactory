@@ -282,20 +282,18 @@ def _render_block_video(job, fallback_clips, sfx_pack, work_dir):
         sem_vids = [fallback_clips[job["global_idx"] % len(fallback_clips)]]
         sync_lock = True
 
-    # Garante clipes de continuação PARA FRENTE distintos caso o clipe principal acabe antes da fala
-    backup_pool = [c for c in (fallback_clips or []) if c and os.path.exists(c) and c not in sem_vids]
-    while len(sem_vids) < 3 and backup_pool:
-        pick = backup_pool[(job["global_idx"] + len(sem_vids)) % len(backup_pool)]
-        sem_vids.append(pick)
-        backup_pool = [c for c in backup_pool if c != pick]
-
     frames_v0 = _load_video_frames(sem_vids[0], max_frames=max(total_frames + 24, 520))
-    frames_v1 = _load_video_frames(sem_vids[1], max_frames=max(total_frames + 24, 420)) if len(sem_vids) > 1 else []
-    frames_v2 = _load_video_frames(sem_vids[2], max_frames=max(total_frames + 24, 420)) if len(sem_vids) > 2 else []
-    if not frames_v1:
+    if sync_lock:
         frames_v1 = frames_v0
-    if not frames_v2:
-        frames_v2 = frames_v1
+        frames_v2 = frames_v0
+    else:
+        backup_pool = [c for c in (fallback_clips or []) if c and os.path.exists(c) and c not in sem_vids]
+        while len(sem_vids) < 3 and backup_pool:
+            pick = backup_pool[(job["global_idx"] + len(sem_vids)) % len(backup_pool)]
+            sem_vids.append(pick)
+            backup_pool = [c for c in backup_pool if c != pick]
+        frames_v1 = _load_video_frames(sem_vids[1], max_frames=max(total_frames + 24, 420)) if len(sem_vids) > 1 else frames_v0
+        frames_v2 = _load_video_frames(sem_vids[2], max_frames=max(total_frames + 24, 420)) if len(sem_vids) > 2 else frames_v1
 
     remotion_frames = []
     if is_remotion_scene and job.get("remotion_mp4") and os.path.exists(job["remotion_mp4"]):
