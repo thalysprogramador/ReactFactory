@@ -32,6 +32,8 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           YOUTUBE_TOKEN_BASE64: ${{ secrets.YOUTUBE_TOKEN_BASE64 }}
+          YOUTUBE_TOKEN_2_BASE64: ${{ secrets.YOUTUBE_TOKEN_2_BASE64 }}
+          YOUTUBE_TOKEN_3_BASE64: ${{ secrets.YOUTUBE_TOKEN_3_BASE64 }}
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           DESTINATION_EMAILS: ${{ secrets.DESTINATION_EMAILS }}
