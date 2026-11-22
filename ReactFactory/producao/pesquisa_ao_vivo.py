@@ -115,7 +115,7 @@ def _save_v5_history(video_ids, topic=None):
         json.dump(h, f, ensure_ascii=False, indent=2)
 
 GTA_RE = re.compile(r"gta\s*(6|vi)\b|grand theft auto vi|vice city|leonida", re.I)
-BLOCK_RE = re.compile(r"trailer oficial|official trailer|react(ing)? to trailer|previs[aã]o|vai ter|teoria", re.I)
+BLOCK_RE = re.compile(r"trailer oficial|official trailer|react(ing)? to trailer|previs[aã]o|vai ter|teoria|before you buy|gameranx|tier list|ranking todos", re.I)
 
 QUERY_POOL = [
     "gta 6 bug", "gta 6 bugs engraçados", "gta 6 glitch", "gta 6 segredo", "gta 6 segredos escondidos",
@@ -458,13 +458,13 @@ def baixar_e_validar_momentos(momentos, cands_by_id, ffmpeg_exe, pad=1.0):
 
     validados = []
     for m in baixados:
-        frames = _frames_b64(m["clip"], n=4)
+        frames = _frames_b64(m["clip"], n=5)
         parts = [{"inline_data": {"mime_type": "image/jpeg", "data": b}} for b in frames]
-        prompt = (f"Estas são 4 imagens em ordem de um trecho de vídeo de GTA 6. Descrição esperada: '{m['o_que_acontece']}'.\n"
-                  "Responda APENAS um objeto JSON: {\"e_gameplay\": true/false (true SOMENTE se mostra gameplay real do jogo, false se for só webcam/menu/tela preta/estática), "
-                  "\"tem_logo_ou_trailer\": true/false (true se aparecer logo gigante 'Grand Theft Auto VI', tela de pré-venda, contagem regressiva ou cartela oficial de trailer), "
+        prompt = (f"Estas são 5 imagens em ordem (início, meio e fim) de um trecho de vídeo de GTA 6. Descrição esperada: '{m['o_que_acontece']}'.\n"
+                  "Responda APENAS um objeto JSON: {\"e_gameplay\": true/false (true SOMENTE se TODAS as 5 imagens mostrarem gameplay contínua real de GTA 6, false se houver tela de encerramento/outro de canal, outro jogo, menu, tela preta ou apresentador em tela cheia), "
+                  "\"tem_logo_ou_trailer\": true/false (true se aparecer logo gigante 'Grand Theft Auto VI', logo/outro de canal tipo Gameranx/IGN, tela de pré-venda ou cartela oficial de trailer), "
                   "\"tem_overlay_poluido\": true/false (true APENAS se houver QR code grande, banner de patrocinador cobrindo a tela, ou apresentador em tela cheia falando sem gameplay; uma facecam pequena no canto durante gameplay real NÃO é poluído), "
-                  "\"bate_com_descricao\": true/false, \"descricao_real\": \"o que realmente aparece no jogo, objetivo, 1 frase\", "
+                  "\"bate_com_descricao\": true/false, \"descricao_real\": \"o que realmente aparece no jogo em todas as imagens, objetivo, 1 frase\", "
                   "\"nota_visual\": 1-10 (impacto/curiosidade da cena), \"frase_thumb\": \"2 a 4 palavras de impacto sobre a cena\", "
                   "\"regiao\": \"vice_city|leonida_keys|grassrivers|port_gellhorn|ambrosia|mount_kalaga|nenhuma\"}")
         try:
