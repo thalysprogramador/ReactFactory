@@ -538,8 +538,10 @@ def pesquisar_clipes_twitch(ffmpeg_exe, min_valid=1):
     queries = [
         ("LAST_DAY", ["PT"], 35),
         ("LAST_DAY", ["EN"], 35),
-        ("LAST_WEEK", ["PT"], 40),
-        ("LAST_WEEK", ["EN"], 40),
+        ("LAST_WEEK", ["PT"], 45),
+        ("LAST_WEEK", ["EN"], 45),
+        ("LAST_MONTH", ["PT"], 45),
+        ("LAST_MONTH", ["EN"], 45),
     ]
     for period, langs, limit in queries:
         try:
