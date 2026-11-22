@@ -28,35 +28,49 @@ from producao.studio_composer import compose_studio_video  # noqa: E402
 from composer import FFMPEG_EXE  # noqa: E402
 
 
-def run_gta6_long_pipeline(do_upload=False):
+def run_gta6_long_pipeline(do_upload=False, max_qc_attempts=2):
+    import shutil
+
+    for qc_attempt in range(1, max_qc_attempts + 1):
+        try:
+            return _run_gta6_long_once(do_upload=do_upload, qc_attempt=qc_attempt)
+        except Exception as err:
+            print(f"[PIPELINE LONGO V8] Tentativa {qc_attempt}/{max_qc_attempts} reprovada/falhou: {err}", flush=True)
+            for d_clean in (os.path.join(GTA6_TEMP_DIR, "long_work"), os.path.join(GTA6_TEMP_DIR, "pesquisa_v5")):
+                shutil.rmtree(d_clean, ignore_errors=True)
+            if qc_attempt >= max_qc_attempts:
+                raise
+
+
+def _run_gta6_long_once(do_upload=False, qc_attempt=1):
     print("====================================================")
-    print("   PRODUTORA AUDIOVISUAL GTA 6 — PIPELINE 16 ETAPAS ")
+    print(f"   PRODUTORA AUDIOVISUAL GTA 6 — PIPELINE V8 (TENTATIVA {qc_attempt}) ")
     print("====================================================")
 
     os.makedirs(GTA6_TEMP_DIR, exist_ok=True)
     work_dir = os.path.join(GTA6_TEMP_DIR, "long_work")
     os.makedirs(work_dir, exist_ok=True)
 
-    # ETAPAS 1-3: Pesquisa ampla do zero em tempo real (V7.5 — OBRIGATÓRIO baixar clipes novos a cada produção!)
+    # ETAPAS 1-3: Pesquisa ampla multi-rodada do zero em tempo real (V8 — busca até acumular >=12 clipes NOVOS únicos!)
     research = research_gta6_references(kind="long")
     v5_momentos = []
     from producao.pesquisa_ao_vivo import pesquisar_do_zero  # noqa: WPS433
 
     for attempt_v5 in (1, 2):
         try:
-            pauta_v5, v5_momentos = pesquisar_do_zero(FFMPEG_EXE)
-            if len(v5_momentos) >= 3:
+            pauta_v5, v5_momentos = pesquisar_do_zero(FFMPEG_EXE, min_valid=12)
+            if len(v5_momentos) >= 6:
                 research["v5_momentos"] = v5_momentos
                 if (pauta_v5.get("pauta_longo") or {}).get("tema"):
                     research["chosen_angle"] = pauta_v5["pauta_longo"]["tema"]
                 break
-            print(f"[PESQUISA V5 LONGO] Tentativa {attempt_v5}/2 obteve apenas {len(v5_momentos)} clipes novos -> retentando busca...", flush=True)
+            print(f"[PESQUISA V8 LONGO] Tentativa {attempt_v5}/2 obteve apenas {len(v5_momentos)} clipes novos -> retentando busca...", flush=True)
         except Exception as err_v5:
-            print(f"[PESQUISA V5 LONGO] Aviso tentativa {attempt_v5}/2: {err_v5}", flush=True)
+            print(f"[PESQUISA V8 LONGO] Aviso tentativa {attempt_v5}/2: {err_v5}", flush=True)
 
-    if len(v5_momentos) < 3:
+    if len(v5_momentos) < 6:
         raise RuntimeError(
-            f"BLOQUEADO (ZERO REPETIÇÃO): Pesquisa ao vivo obteve apenas {len(v5_momentos)} clipes novos (mínimo 3). "
+            f"BLOQUEADO (ZERO REPETIÇÃO): Pesquisa ao vivo obteve apenas {len(v5_momentos)} clipes novos (mínimo 6). "
             "Abortando produção para NUNCA subir vídeo longo só com clipes antigos repetidos!"
         )
 
