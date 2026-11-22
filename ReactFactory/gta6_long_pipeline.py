@@ -79,10 +79,10 @@ def _run_gta6_long_once(do_upload=False, qc_attempt=1):
     # ETAPA 4: Direção Criativa (Agente 1)
     direcao = AgenteDiretorCriativo.definir_direcao_criativa(research, formato="long")
 
-    # ETAPAS 5-6: Roteiro verificado + Storyboard semântico (Agente 2) — 5 Atos x 6 blocos (~8m50s)
+    # ETAPAS 5-6: Roteiro verificado + Storyboard semântico (Agente 2) — 5 Atos x 4 blocos = 20 blocos únicos (~8m10s, 100% gameplay)
     try:
         script_data = AgentePesquisadorRoteirista.gerar_roteiro_longo_verificado(
-            research, direcao, num_acts=5, blocks_per_act=6
+            research, direcao, num_acts=5, blocks_per_act=4
         )
     except Exception as err_ag2:
         print(f"[GTA6 STUDIO] Aviso Agente 2 ({err_ag2}) -> usando gerador completo 30 blocos com sincronização V7.9.")
