@@ -549,7 +549,7 @@ def pesquisar_clipes_twitch(ffmpeg_exe, min_valid=1):
                 json={"query": gql, "variables": {"name": "Grand Theft Auto VI", "first": limit, "period": period, "langs": langs}},
                 timeout=18,
             )
-            edges = ((r.json().get("data") or {}).get("game") or {}).get("clips", {}).get("edges", [])
+            edges = ((((r.json().get("data") or {}).get("game") or {}).get("clips") or {}).get("edges") or [])
             for e in edges:
                 n = e.get("node") or {}
                 slug = n.get("slug") or ""
@@ -624,7 +624,7 @@ def pesquisar_clipes_twitch(ffmpeg_exe, min_valid=1):
             "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1",
             "-c:v", "libx264", "-preset", "fast", "-crf", "19",
             "-c:a", "aac", "-ar", "48000", "-ac", "2", dst,
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=60)
         try:
             os.remove(raw)
         except OSError:
