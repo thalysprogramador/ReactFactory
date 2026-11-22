@@ -95,26 +95,20 @@ class AgenteDiretorCriativo:
                         remotion_used_in_act = True
                         used_remotion_types.add(st)
 
-                # Trava 1-para-1 do clipe real validado (ZERO repetição + Ato 1 OBRIGATORIAMENTE usa clipes novos live_*!)
-                live_cids = {cid for cid, m in clip_catalog.items() if int(m.get("priority", 3)) == 1}
+                # TRAVA DETERMINÍSTICA V8 (PROIBIDO TROCAR O CLIPE DEPOIS QUE O ROTEIRO FOI ESCRITO!):
+                # - Se o bloco já recebeu seu `clip_id` travado antes da escrita do roteiro (`locked_clip=True` ou presente no catálogo),
+                #   MANTÉM EXATAMENTE ESSE CLIPE (1 único clipe `[meta["path"]]`, sem segundo clipe desconexo!) para que a imagem
+                #   bata 100% do primeiro ao último segundo com o que o narrador está falando!
                 chosen_cid = blk.get("clip_id") or blk.get("moment_id")
                 if chosen_cid and f"live_{chosen_cid}" in clip_catalog:
                     chosen_cid = f"live_{chosen_cid}"
 
-                # No Ato 1 (especialmente blocos iniciais de retenção), se ainda houver clipes live_* disponíveis,
-                # PROÍBE usar clipes do acervo estático (garante abertura 100% inédita e aprovada pelo Agente 5!)
-                unused_live = live_cids - used_cids
-                if a_idx == 0 and unused_live and chosen_cid not in unused_live:
-                    chosen_cid = None
-
-                def _rank_candidates(exclude_set, only_live=False):
+                def _rank_candidates(exclude_set):
                     ranked_local = []
                     for cid, meta in clip_catalog.items():
                         if cid in exclude_set:
                             continue
                         prio = int(meta.get("priority", 3))
-                        if only_live and prio != 1:
-                            continue
                         sc = _score_text_against_tags(txt, meta.get("tags", []))
                         desc_words = {w.strip(".,!?") for w in meta.get("desc", "").lower().split() if len(w) >= 4}
                         txt_words = {w.strip(".,!?") for w in txt.split() if len(w) >= 4}
@@ -122,7 +116,7 @@ class AgenteDiretorCriativo:
                         if meta.get("has_audio"):
                             sc += 4
                         if prio == 1:
-                            sc += 25
+                            sc += 35
                         elif prio == 2:
                             sc += 4
                         ranked_local.append((sc, cid))
@@ -130,9 +124,7 @@ class AgenteDiretorCriativo:
                     return ranked_local
 
                 if not (chosen_cid and chosen_cid in clip_catalog and chosen_cid not in used_cids):
-                    ranked = _rank_candidates(used_cids, only_live=bool(a_idx == 0 and unused_live))
-                    if not ranked:
-                        ranked = _rank_candidates(used_cids, only_live=False)
+                    ranked = _rank_candidates(used_cids)
                     if ranked:
                         chosen_cid = ranked[0][1]
                     elif clip_catalog:
@@ -141,17 +133,9 @@ class AgenteDiretorCriativo:
                 if chosen_cid and chosen_cid in clip_catalog:
                     used_cids.add(chosen_cid)
                     meta = clip_catalog[chosen_cid]
-                    # Anexa 2º clipe de continuação PARA FRENTE relacionado ao tema (evita qualquer reverso se o 1º acabar antes!)
-                    backup_cands = _rank_candidates({chosen_cid})
-                    vids_for_blk = [meta["path"]]
-                    for _, bcid in backup_cands[:3]:
-                        bp = clip_catalog[bcid]["path"]
-                        if bp != meta["path"] and bp not in vids_for_blk:
-                            vids_for_blk.append(bp)
-                            if len(vids_for_blk) >= 2:
-                                break
                     blk["clip_id"] = chosen_cid
-                    blk["video_clips"] = vids_for_blk
+                    blk["locked_scene_desc"] = meta.get("desc", "")
+                    blk["video_clips"] = [meta["path"]]
                     blk["sync_lock"] = True
                     if not blk.get("location_key") or blk.get("location_key") == "vice_city":
                         blk["location_key"] = meta.get("regiao", "vice_city")
@@ -208,17 +192,31 @@ class AgentePesquisadorRoteirista:
         from producao.catalog import get_all_verified_clip_catalog  # noqa: WPS433
 
         clip_catalog = get_all_verified_clip_catalog(research_data.get("v5_momentos"))
-        cat_lines = "\n".join(
-            f"- clip_id=\"{cid}\" | fonte=\"{meta['channel']}\" | cena_na_tela=\"{meta['desc']}\""
-            for cid, meta in list(clip_catalog.items())[:45]
-        )
+        # TRAVA DETERMINÍSTICA V8 (CLIP-FIRST SCRIPTING):
+        # 1. Prioriza 100% os clipes recém-pesquisados ao vivo (priority == 1) e ordena sem NENHUMA repetição.
+        # 2. Dimensiona o número de blocos para NUNCA ultrapassar a quantidade de clipes únicos disponíveis!
+        ordered_items = sorted(clip_catalog.items(), key=lambda kv: int(kv[1].get("priority", 3)))
+        total_avail = len(ordered_items)
+        blocks_per_act = max(3, min(blocks_per_act, total_avail // max(1, num_acts)))
+        total_target_blocks = num_acts * blocks_per_act
+        locked_plan = ordered_items[:total_target_blocks]
+
+        plan_lines = []
+        for idx_b, (cid, meta) in enumerate(locked_plan):
+            a_n = (idx_b // blocks_per_act) + 1
+            b_n = (idx_b % blocks_per_act) + 1
+            plan_lines.append(
+                f"- ATO {a_n}, BLOCO {b_n}: clip_id=\"{cid}\" | fonte=\"{meta['channel']}\" | "
+                f"CENA EXATA QUE APARECE NA TELA: \"{meta['desc']}\""
+            )
+        cat_lines = "\n".join(plan_lines)
 
         prompt = f"""Você é o AGENTE 2 (Pesquisador-Chefe e Roteirista) de um canal brasileiro de GTA 6 com edição 100% humanizada e nível cinema.
-Contexto: O GTA 6 acabou de ser lançado! Temos abaixo o CATÁLOGO REAL DE CLIPES DE GAMEPLAY DISPONÍVEIS E VALIDADOS EM DISCO (cada um com seu `clip_id` e a descrição exata do que está passando na tela).
+Contexto: O GTA 6 acabou de ser lançado! Abaixo está a ESCALETA TRAVADA BLOCO A BLOCO dos {total_target_blocks} clipes reais (cada bloco já tem seu `clip_id` ÚNICO e a descrição visual exata do que está passando na tela naquele bloco!).
 
 PAUTA PRINCIPAL: "{angle}"
 
-CATÁLOGO REAL DE CLIPES DISPONÍVEIS PARA ESTE VÍDEO (USE SOMENTE ESTES `clip_id`s):
+ESCALETA TRAVADA BLOCO A BLOCO (OBRIGATÓRIO SEGUIR ESTA ORDEM EXATA E ESCREVER A NARRAÇÃO DE CADA BLOCO SOBRE A SUA RESPECTIVA CENA):
 {cat_lines}
 
 REFERÊNCIAS RECENTES:
@@ -226,10 +224,9 @@ REFERÊNCIAS RECENTES:
 
 REGRAS ABSOLUTAS DE SINCRONIZAÇÃO E QUALIDADE (ZERO TOLERÂNCIA A ERROS):
 1. SINCRONIZAÇÃO 1-PARA-1 OBRIGATÓRIA (FALA ↔ IMAGEM):
-   - O vídeo terá exatamente {num_acts} Atos com {blocks_per_act} blocos cada (total = {num_acts * blocks_per_act} blocos, resultando em 8m30s a 9m30s).
-   - Para CADA bloco, você DEVE escolher **1 `clip_id` ÚNICO** da lista acima (PROIBIDO repetir o mesmo `clip_id` em dois blocos diferentes do vídeo!).
-   - A `narration` daquele bloco DEVE falar e comentar **EXATAMENTE SOBRE O QUE ESTÁ NA `cena_na_tela` DAQUELE `clip_id`**!
-   - PROIBIDO narrar sobre um assunto (ex: celular ou bug) enquanto o `clip_id` escolhido mostra outra coisa (ex: carro ou praia). O texto tem que casar 100% com a imagem daquele `clip_id`!
+   - O vídeo terá exatamente {num_acts} Atos com {blocks_per_act} blocos cada (total = {total_target_blocks} blocos).
+   - Para CADA Ato e Bloco, você É OBRIGADO a usar o exato `clip_id` atribuído acima naquele Ato/Bloco e escrever a `narration` **COMENTANDO E ANALISANDO EXCLUSIVAMENTE O QUE APARECE NA `CENA EXATA QUE APARECE NA TELA` DAQUELE BLOCO**!
+   - PROIBIDO falar sobre outro assunto genérico enquanto aquela cena específica está passando na tela! Se a cena mostra um carro com emblema de coelho, fale sobre esse carro e esse detalhe; se mostra o personagem caindo da moto nos fios, fale sobre essa física!
 2. PROTAGONISTA 100% O JOGO (NÃO REAÇÕES DE STREAMERS):
    - Foque no jogo: novidades, detalhes absurdos, bugs, física, mecânicas, mapa e momentos loucos. Cite o criador apenas de forma natural quando fizer sentido (*"como apareceu na gameplay do..."*).
 3. GANCHO FORTE NO ATO 1 BLOCO 1 + CTA NATURAL NO ÚLTIMO BLOCO:
@@ -284,18 +281,29 @@ Retorne APENAS JSON válido no formato:
         for attempt_sc in (1, 2):
             m_order = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite"] if attempt_sc == 1 else ["gemini-3.1-flash-lite", "gemini-2.5-flash"]
             cand_data, model_used = gemini_text(
-                prompt + f"\n\nOBRIGATÓRIO: O array 'acts' DEVE conter TODOS os {num_acts} Atos (act_num 1 até {num_acts}), cada um com {blocks_per_act} blocos (total = {num_acts * blocks_per_act} blocos)! PROIBIDO retornar apenas 1 Ato!",
+                prompt + f"\n\nOBRIGATÓRIO: O array 'acts' DEVE conter TODOS os {num_acts} Atos (act_num 1 até {num_acts}), cada um com {blocks_per_act} blocos (total = {total_target_blocks} blocos)! PROIBIDO retornar apenas 1 Ato!",
                 models=m_order,
                 json_mode=True,
-                temperature=0.72,
+                temperature=0.65,
             )
             tot_b = sum(len(a.get("blocks") or []) for a in (cand_data.get("acts") or []))
-            if tot_b >= (num_acts * blocks_per_act) - 6:
+            if tot_b >= total_target_blocks - 4:
                 data = cand_data
                 break
-            print(f"[AGENTE 2] Aviso: modelo {model_used} retornou apenas {tot_b} blocos (esperado {num_acts * blocks_per_act}) -> retentando...", flush=True)
+            print(f"[AGENTE 2] Aviso: modelo {model_used} retornou apenas {tot_b} blocos (esperado {total_target_blocks}) -> retentando...", flush=True)
         if not data:
-            raise RuntimeError(f"Roteiro longo retornou poucos blocos ({tot_b} < {num_acts * blocks_per_act})")
+            raise RuntimeError(f"Roteiro longo retornou poucos blocos ({tot_b} < {total_target_blocks})")
+
+        # Trava determinística: garante que o bloco #i receba EXATAMENTE o clip_id #i da escaleta travada!
+        g_idx = 0
+        for act in data.get("acts", []):
+            for blk in act.get("blocks", []):
+                if g_idx < len(locked_plan):
+                    l_cid, l_meta = locked_plan[g_idx]
+                    blk["clip_id"] = l_cid
+                    blk["locked_scene_desc"] = l_meta.get("desc", "")
+                    g_idx += 1
+
         data["model_used"] = model_used
         data = AgenteAuditorViral.auditar_e_otimizar_viralizacao(data, formato="long")
         data["acts"] = AgenteDiretorCriativo.enriquecer_storyboard(data.get("acts", []), formato="long", research_data=research_data)
@@ -697,11 +705,48 @@ class AgenteControleQualidade:
                 or "GTA 6 Gameplay"
             )
             if formato in ("long", "pilot"):
+                from voice_and_avatar import get_audio_duration  # noqa: WPS433
+
                 acts = script_data.get("acts") or []
                 first_blk = ((acts[0].get("blocks") or [{}])[0]) if acts else {}
                 hook_ref = (first_blk.get("narration") or "")[:240]
+                # Constrói linha do tempo exata [t_ini, t_fim, narração, cena_esperada] para o Agente 5 auditar FALA ↔ IMAGEM em cada frame!
+                timeline_blocks = []
+                cur_t = 0.0
+                for a_i, act in enumerate(acts):
+                    act_num = int(act.get("act_num", a_i + 1))
+                    if a_i > 0:
+                        cur_t += 1.10  # card divisor rápido nos Atos 2..5
+                    for b_i, blk in enumerate(act.get("blocks", [])):
+                        bid = blk.get("id") or f"a{act_num}_b{b_i}"
+                        wp = wav_map.get(bid)
+                        b_dur = max(2.4, (get_audio_duration(wp) + 0.20) if (wp and os.path.exists(wp)) else 17.0)
+                        timeline_blocks.append((
+                            cur_t,
+                            cur_t + b_dur,
+                            bid,
+                            (blk.get("narration") or "")[:220],
+                            (blk.get("locked_scene_desc") or blk.get("headline") or "")[:160],
+                        ))
+                        cur_t += b_dur
+
+                frame_script_lines = []
+                for idx_f, (t_f, _) in enumerate(frames_b64):
+                    matched_narr = hook_ref
+                    matched_scene = ""
+                    for t0, t1, bid, b_narr, b_sc in timeline_blocks:
+                        if t0 <= t_f <= t1:
+                            matched_narr = f"[{bid}] {b_narr}"
+                            matched_scene = b_sc
+                            break
+                    frame_script_lines.append(
+                        f"- Frame #{idx_f + 1} (t={t_f}s) | O QUE O NARRADOR ESTÁ FALANDO NESTE EXATO MOMENTO: \"{matched_narr}\" "
+                        f"| Cena travada esperada: \"{matched_scene}\""
+                    )
+                per_frame_script_context = "\n".join(frame_script_lines)
             else:
                 hook_ref = f"{script_data.get('hook_text', '')} | {script_data.get('interrupt_text', '')} | {script_data.get('outro_text', '')}"[:260]
+                per_frame_script_context = f"- Roteiro falado no Short: \"{hook_ref}\""
 
             ts_labels = ", ".join(f"#{i + 1}={t}s" for i, (t, _) in enumerate(frames_b64))
             parts = [{"inline_data": {"mime_type": "image/jpeg", "data": b64}} for _, b64 in frames_b64]
@@ -712,14 +757,17 @@ As {len(frames_b64)} imagens anexadas estão em ordem cronológica exata: {ts_la
 TÍTULO DO VÍDEO: "{title_ref}"
 GANCHO / ROTEIRO DE ABERTURA: "{hook_ref}"
 
-CONTEXTO TEMPORAL OBRIGATÓRIO: Estamos em 19 de Novembro de 2026 — GTA 6 FOI LANÇADO OFICIALMENTE HOJE! NUNCA acuse cenas reais de gameplay/easter eggs/bugs bizarros de GTA 6 de serem "mod de GTA V" ou "clickbait porque GTA 6 não saiu".
+MAPA SINCRONIZADO FALA ↔ IMAGEM EM CADA FRAME AMOSTRADO:
+{per_frame_script_context}
+
+CONTEXTO TEMPORAL OBRIGATÓRIO: Estamos em Novembro de 2026 — GTA 6 FOI LANÇADO OFICIALMENTE! NUNCA acuse cenas reais de gameplay/easter eggs/bugs bizarros de GTA 6 de serem "mod de GTA V" ou "clickbait porque GTA 6 não saiu".
 ESTILO DE LEGENDA PADRÃO DO CANAL: Nossas legendas estilo CapCut/Broadcast exibem 2 a 3 palavras grandes sincronizadas com a voz por vez (palavra ativa em amarelo). Isso é INTENCIONAL para retenção — NÃO reprove por aparecerem poucas palavras por frame; reprove APENAS se o texto estiver cortado fora da tela, ilegível ou cobrindo o rosto/ação central.
 
 AUDITE RIGOROSAMENTE ESTES 5 CRITÉRIOS VISUAIS (NÃO PASSE PANO — REPROVE SE ESTIVER RUIM!):
 1. `abertura_limpa_sem_logo_ou_cartela`: Os frames iniciais (#1 em 0.8s e #2 em 3.5s, que pertencem à mesma cena inicial de gancho) mostram GAMEPLAY REAL em ação?
    - Marque `false` SE aparecer tela de logo gigante "Grand Theft Auto VI", cartela borrada estática de "CAPÍTULO 1", apresentador em tela cheia falando sem gameplay, tela de pré-venda ou trailer velho na abertura!
-2. `sem_cenas_repetidas_ou_estaticas`: {"Para SHORT (25-45s), acompanhar uma única cena/corte contínuo de live ou gameplay (ex: 1 momento viral de 20s) é NORMAL e APROVADO — reprove APENAS se a imagem ficar congelada/travada sem ação ou colar takes repetidos de forma quebrada." if formato == "short" else "Nota: #1 (0.8s) e #2 (3.5s) são da mesma tomada inicial de abertura (normal serem da mesma cena). Avalie se entre os frames #2, #3, #4, #5, #6, #7, #8, #9 e #10 há variedade real de cenas/movimento ao longo do vídeo (Nota: diferentes cenas de direção/carros em locais diferentes de GTA 6 fazem parte natural do jogo e SÃO válidas; reprove APENAS se o vídeo ficar congelado na mesma imagem estática)."}
-3. `coerencia_visual_com_roteiro`: As cenas exibidas nos frames têm relação real com o tema do título e do gancho (reprove se for clickbait desconexo)?
+2. `sem_cenas_repetidas_ou_estaticas`: {"Para SHORT (25-45s), acompanhar uma única cena/corte contínuo de live ou gameplay (ex: 1 momento viral de 20s) é NORMAL e APROVADO — reprove APENAS se a imagem ficar congelada/travada sem ação ou colar takes repetidos de forma quebrada." if formato == "short" else "Nota: #1 (0.8s) e #2 (3.5s) são da mesma tomada inicial de abertura (normal serem da mesma cena). Avalie os frames #3 a #10: reprove (false) SE o mesmo take/clipe exato aparecer repetido em blocos diferentes do vídeo ou se o vídeo ficar congelado."}
+3. `coerencia_visual_com_roteiro`: Compare CADA frame com `O QUE O NARRADOR ESTÁ FALANDO NESTE EXATO MOMENTO` listado acima! A imagem mostrada na tela tem relação real com o que o narrador está descrevendo naquele momento (reprove com `false` se a maioria dos frames mostrar cenas totalmente desconexas da fala)?
 4. `qualidade_visual_e_legendas`: As legendas estão limpas/legíveis, sem cortes grotescos, sem tarjas artificiais de IA feias no topo ("CONFIRMADO/VERIFICADO"), e o enquadramento está limpo?
 5. `potencial_retencao_elite`: Nota rigorosa de 0 a 100 para retenção orgânica no YouTube.
 
