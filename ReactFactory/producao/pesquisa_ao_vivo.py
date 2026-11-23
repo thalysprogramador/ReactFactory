@@ -665,8 +665,37 @@ def pesquisar_clipes_twitch(ffmpeg_exe, min_valid=1):
                     pass
             return None
 
+    def _clip_strip_b64(mp4_path, label_text):
+        """Extrai 3 frames (15%, 50%, 85%) lado a lado em 1 faixa JPEG leve (960x180) para validação em lote (7 clipes por chamada Gemini!)."""
+        import numpy as np
+        cap = cv2.VideoCapture(mp4_path)
+        tot = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        tiles = []
+        for frac in (0.15, 0.50, 0.85):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(tot * frac))
+            ok, fr = cap.read()
+            if ok and fr is not None:
+                tiles.append(cv2.resize(fr, (320, 180), interpolation=cv2.INTER_AREA))
+        cap.release()
+        if not tiles:
+            return None
+        while len(tiles) < 3:
+            tiles.append(tiles[-1])
+        strip = np.hstack(tiles)
+        cv2.rectangle(strip, (0, 0), (150, 26), (12, 14, 20), -1)
+        cv2.putText(strip, label_text[:14], (8, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 230, 255), 2, cv2.LINE_AA)
+        ok_enc, buf = cv2.imencode(".jpg", strip, [cv2.IMWRITE_JPEG_QUALITY, 74])
+        return base64.b64encode(buf.tobytes()).decode("ascii") if ok_enc else None
+
+    import time as _time
+    t_val_start = _time.time()
+    max_val_secs = 360 if min_valid >= 6 else 180
+
     for start_idx in range(0, max_candidates, batch_len):
         if len(validados) >= target_valid:
+            break
+        if (_time.time() - t_val_start) > max_val_secs and len(validados) >= min(6, min_valid):
+            print(f"[TWITCH V9.4] Orçamento de tempo atingido com {len(validados)} clipes validados -> seguindo para produção!", flush=True)
             break
         batch = ordered[start_idx:start_idx + batch_len]
         if not batch:
@@ -675,56 +704,81 @@ def pesquisar_clipes_twitch(ffmpeg_exe, min_valid=1):
             baixados = [m for m in pool.map(_dl_tw, [(start_idx + i, c) for i, c in enumerate(batch)]) if m]
 
         print(
-            f"[TWITCH V9.2] Lote {start_idx // batch_len + 1}: baixados {len(baixados)}/{len(batch)} clipes HD com áudio original!",
+            f"[TWITCH V9.4] Lote {start_idx // batch_len + 1}: baixados {len(baixados)}/{len(batch)} clipes HD com áudio original!",
             flush=True,
         )
 
-        for m in baixados:
+        # V9.4 BATCH VISION: valida 7 clipes por VEZ em 1 ÚNICA chamada Gemini (7x menos cota + 10x mais rápido!)
+        chunk_sz = 7
+        for ci in range(0, len(baixados), chunk_sz):
             if len(validados) >= target_valid:
                 break
-            frames = _frames_b64(m["clip"], n=5)
-            if not frames:
+            chunk = baixados[ci:ci + chunk_sz]
+            parts = []
+            meta_lines = []
+            chunk_map = {}
+            for m in chunk:
+                sb64 = _clip_strip_b64(m["clip"], m["mid"])
+                if not sb64:
+                    continue
+                parts.append({"inline_data": {"mime_type": "image/jpeg", "data": sb64}})
+                meta_lines.append(f"- {m['mid']} | streamer='{m['canal']}' | titulo='{m['o_que_acontece'][:100]}'")
+                chunk_map[m["mid"]] = m
+            if not parts:
                 continue
-            parts = [{"inline_data": {"mime_type": "image/jpeg", "data": b}} for b in frames]
+
             prompt = (
-                f"Estas são 5 imagens em ordem (início, meio e fim) de um clipe viral da Twitch de GTA 6 do streamer '{m['canal']}' (título: '{m['o_que_acontece']}').\n"
-                "Responda APENAS um objeto JSON:\n"
-                "{\"e_gameplay\": true/false (true SOMENTE se TODAS as 5 imagens mostrarem gameplay real de GTA 6, false se for só webcam/chat/menu/outro jogo/tela preta), "
-                "\"seguro_monetizacao\": true/false (false se houver nudez, strip club, conteúdo +18 ou violência gráfica explícita que desmonetize no YouTube), "
-                "\"tem_logo_ou_trailer\": true/false (true se for trailer oficial ou tela de logo estática), "
-                "\"tem_overlay_poluido\": true/false (true APENAS se houver QR code gigante, banner cobrindo a tela ou webcam em tela cheia; uma facecam pequena no canto durante gameplay real NÃO é poluído), "
+                "Você recebeu faixas horizontais de 3 frames (início, meio, fim) de clipes virais da Twitch rotulados como GTA 6.\n"
+                "Cada imagem tem o ID no canto superior esquerdo:\n"
+                + "\n".join(meta_lines)
+                + "\n\nRetorne APENAS um JSON no formato {\"items\": [ ... ]} com EXATAMENTE 1 objeto para CADA ID listado acima:\n"
+                "{\"mid\": \"tw_mX\", "
+                "\"e_gameplay\": true/false (true SOMENTE se mostrar gameplay real de GTA 6, false se for GTA V/San Andreas/outro jogo/só webcam/menu/tela preta), "
+                "\"seguro_monetizacao\": true/false (false se houver nudez, strip club, conteúdo +18 ou violência gráfica explícita), "
+                "\"tem_logo_ou_trailer\": true/false (true se for trailer oficial ou logo estático), "
+                "\"tem_overlay_poluido\": true/false (true APENAS se houver QR code gigante, banner cobrindo a tela ou webcam em tela cheia; facecam pequena no canto NÃO é poluído), "
                 "\"assunto\": \"bug|segredo|detalhe|mecanica|engracado|acao|mapa\", "
-                "\"descricao_real\": \"descreva objetivamente em 1 frase em PT-BR o que REALMENTE acontece no jogo GTA 6 neste clipe\", "
-                "\"nota_visual\": 1-10 (impacto/curiosidade/entretenimento da cena), "
-                "\"frase_thumb\": \"2 a 4 palavras de impacto sobre a cena\", "
+                "\"descricao_real\": \"descreva objetivamente em 1 frase em PT-BR o que REALMENTE acontece no GTA 6 neste clipe\", "
+                "\"nota_visual\": 1-10, "
+                "\"frase_thumb\": \"2 a 4 palavras de impacto\", "
                 "\"regiao\": \"vice_city|leonida_keys|grassrivers|port_gellhorn|ambrosia|mount_kalaga|nenhuma\"}"
             )
             try:
-                v, _ = gemini_text(prompt, json_mode=True, temperature=0.2, parts_extra=parts)
-                if isinstance(v, list):
-                    v = v[0] if (v and isinstance(v[0], dict)) else {}
+                res, used_m = gemini_text(prompt, json_mode=True, temperature=0.2, parts_extra=parts, attempts_per_model=2)
+                items = res.get("items") if isinstance(res, dict) else (res if isinstance(res, list) else [])
+                if not isinstance(items, list):
+                    items = []
+                print(f"[TWITCH V9.4 BATCH] {len(items)}/{len(chunk_map)} avaliados em 1 chamada ({used_m})", flush=True)
             except Exception as err:
-                print(f"[TWITCH VALIDAÇÃO] {m['mid']} erro {err}", flush=True)
+                print(f"[TWITCH V9.4 BATCH] Erro no lote ({err}) -> pulando lote", flush=True)
                 continue
-            m.update({
-                "validacao": v,
-                "descricao_real": v.get("descricao_real") or m["o_que_acontece"],
-                "assunto": v.get("assunto") or "gameplay",
-            })
-            m["o_que_acontece"] = m["descricao_real"]
-            ok_game = bool(v.get("e_gameplay"))
-            ok_safe = bool(v.get("seguro_monetizacao", True))
-            has_logo = bool(v.get("tem_logo_ou_trailer"))
-            has_clutter = bool(v.get("tem_overlay_poluido"))
-            nota = int(v.get("nota_visual", 0) or 0)
-            aprovado = ok_game and ok_safe and (not has_logo) and (not has_clutter) and nota >= 6
-            print(
-                f"[TWITCH VALIDAÇÃO] {m['mid']} ({m['canal']}) game={ok_game} safe={ok_safe} logo={has_logo} "
-                f"clutter={has_clutter} nota={nota} -> {'OK' if aprovado else 'DESCARTADO'} | {m['descricao_real']}",
-                flush=True,
-            )
-            if aprovado:
-                validados.append(m)
+
+            for v in items:
+                if not isinstance(v, dict):
+                    continue
+                mid = str(v.get("mid") or "").strip()
+                m = chunk_map.get(mid)
+                if not m:
+                    continue
+                m.update({
+                    "validacao": v,
+                    "descricao_real": v.get("descricao_real") or m["o_que_acontece"],
+                    "assunto": v.get("assunto") or "gameplay",
+                })
+                m["o_que_acontece"] = m["descricao_real"]
+                ok_game = bool(v.get("e_gameplay"))
+                ok_safe = bool(v.get("seguro_monetizacao", True))
+                has_logo = bool(v.get("tem_logo_ou_trailer"))
+                has_clutter = bool(v.get("tem_overlay_poluido"))
+                nota = int(v.get("nota_visual", 0) or 0)
+                aprovado = ok_game and ok_safe and (not has_logo) and (not has_clutter) and nota >= 6
+                print(
+                    f"[TWITCH VALIDAÇÃO] {m['mid']} ({m['canal']}) game={ok_game} safe={ok_safe} logo={has_logo} "
+                    f"clutter={has_clutter} nota={nota} -> {'OK' if aprovado else 'DESCARTADO'} | {m['descricao_real']}",
+                    flush=True,
+                )
+                if aprovado:
+                    validados.append(m)
 
     pauta = {
         "momentos": validados,
